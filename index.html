@@ -82,6 +82,8 @@
     padding:12px 24px;cursor:pointer;
   }
   .btn:hover,.btn:focus-visible{background:#332c5c;outline:2px solid var(--accent);outline-offset:2px}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn:disabled:hover{background:#211d3d;outline:none}
   .btn.primary{background:var(--accent);color:#3a2405;border-color:#a86f1f}
   .btn.primary:hover{background:#ffc76e}
   .btn.small{padding:7px 14px;font-size:11px}
@@ -833,8 +835,24 @@ function genCode() {
 }
 const peerId = (code) => 'bmbr-arena-' + code.toLowerCase();
 
+function setBusy(busy) {
+  els.hostBtn.disabled = busy;
+  els.joinBtn.disabled = busy;
+}
+function resetNet(message) {
+  if (peer) { try { peer.destroy(); } catch (e) {} }
+  peer = null; hostConn = null; host = null; localPlayer = null;
+  mode = null; myId = null; roomCode = null;
+  roster = new Map();
+  setBusy(false);
+  if (message) setStatus(message, true);
+  setConn('idle', false);
+  showOverlay('ovStart');
+}
+
 function startHost(name, attempt) {
   const code = genCode();
+  setBusy(true);
   setStatus('Opening arena…');
   setConn('connecting', false);
   peer = new Peer(peerId(code));
@@ -843,9 +861,11 @@ function startHost(name, attempt) {
     roomCode = code;
     host = createHost(clientHandle);
     host.start();
+    // joining our own arena delivers the roster locally, which opens the lobby
     localPlayer = host.handle({ conn: null }, { t: 'join', name });
     els.roomCode.textContent = code;
     setStatus('');
+    setBusy(false);
     setConn('hosting · relay connected', false);
     history.replaceState(null, '', inviteUrl());
   });
@@ -859,20 +879,26 @@ function startHost(name, attempt) {
     conn.on('error', () => { if (p.joined) host.removePlayer(p); });
   });
   peer.on('error', (e) => {
+    if (mode === 'host') return; // already hosting; ignore transient relay errors
     if (e.type === 'unavailable-id' && (attempt || 0) < 3) {
       peer.destroy();
       startHost(name, (attempt || 0) + 1);
     } else {
-      setStatus('Could not open an arena (' + e.type + '). Check your connection and retry.', true);
-      setConn('relay error', true);
+      resetNet('Could not open an arena (' + e.type + '). Check your connection and retry.');
     }
   });
   peer.on('disconnected', () => { try { peer.reconnect(); } catch (err) {} });
 }
 
 function joinRoom(name, code) {
+  setBusy(true);
   setStatus('Joining ' + code + '…');
   setConn('connecting', false);
+  let joined = false;
+  // WebRTC on locked-down networks can neither connect nor error — don't hang forever
+  const guard = setTimeout(() => {
+    if (!joined) resetNet('Could not reach the host of ' + code + '. The room may be gone, or this network blocks peer-to-peer connections.');
+  }, 15000);
   peer = new Peer();
   peer.on('open', () => {
     hostConn = peer.connect(peerId(code), { reliable: true, serialization: 'json' });
@@ -880,22 +906,33 @@ function joinRoom(name, code) {
       mode = 'guest';
       roomCode = code;
       els.roomCode.textContent = code;
-      setStatus('');
       setConn('connected to host', false);
       hostConn.send({ t: 'join', name });
       history.replaceState(null, '', inviteUrl());
     });
-    hostConn.on('data', clientHandle);
+    hostConn.on('data', (msg) => {
+      // only count ourselves in once the host has answered — that's when the lobby opens
+      if (!joined && msg && (msg.t === 'welcome' || msg.t === 'roster')) {
+        joined = true;
+        clearTimeout(guard);
+        setStatus('');
+        setBusy(false);
+      }
+      clientHandle(msg);
+    });
     hostConn.on('close', () => {
+      clearTimeout(guard);
+      if (!joined) { resetNet('The host dropped the connection before you got in. Try again.'); return; }
       els.discSub.textContent = 'The host left or the connection dropped. Ask for a new room code.';
       showOverlay('ovDisc');
       setConn('disconnected', true);
     });
   });
   peer.on('error', (e) => {
-    if (e.type === 'peer-unavailable') setStatus('Room ' + code + ' not found — check the code.', true);
-    else setStatus('Connection error (' + e.type + '). Corporate networks sometimes block WebRTC.', true);
-    setConn('error', true);
+    if (joined) return;
+    clearTimeout(guard);
+    if (e.type === 'peer-unavailable') resetNet('Room ' + code + ' not found — check the code, or ask the host if their tab is still open.');
+    else resetNet('Connection error (' + e.type + '). Corporate networks sometimes block WebRTC.');
   });
 }
 
@@ -913,7 +950,8 @@ els.hostBtn.addEventListener('click', () => {
   audio();
   if (peer) return;
   startHost(getName());
-  showOverlay('ovLobby');
+  // stay on the start screen until the arena is actually open —
+  // the first roster message flips us to the lobby
 });
 els.joinBtn.addEventListener('click', () => {
   audio();
@@ -921,12 +959,12 @@ els.joinBtn.addEventListener('click', () => {
   const code = els.codeInput.value.trim().toUpperCase();
   if (code.length !== 5) { setStatus('Room codes are 5 characters.', true); return; }
   joinRoom(getName(), code);
-  showOverlay('ovLobby');
 });
 els.readyBtn.addEventListener('click', () => {
   audio();
   const me = roster.get(myId);
   if (me) sendToServer({ t: 'ready', v: !me.ready });
+  else showBanner('still connecting — hang tight', 2);
 });
 els.copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(inviteUrl()).then(
