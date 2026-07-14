@@ -167,19 +167,14 @@
     <div class="overlay" id="ovStart">
       <div class="big">Enter the arena</div>
       <input type="text" id="nameInput" maxlength="14" placeholder="your name" autocomplete="off">
-      <div class="joinrow">
-        <input type="text" id="serverInput" placeholder="team server address" autocomplete="off" style="width:280px">
-        <button class="btn primary" id="serverBtn">Connect</button>
-      </div>
-      <div class="hosthint">
-        <div class="joinrow" style="margin-bottom:6px">
-          <span>Hosting today?</span>
-          <button class="btn small" id="launchHostBtn">Launch host</button>
+      <button class="btn primary" id="serverBtn">Play online</button>
+      <div class="hosthint" id="serverHint">Connects to the team arena &mdash; play with anyone who opens this link.</div>
+      <details class="hosthint" id="advBox">
+        <summary style="cursor:pointer;letter-spacing:.12em">use a different server</summary>
+        <div class="joinrow" style="margin-top:8px">
+          <input type="text" id="serverInput" placeholder="server address" autocomplete="off" style="width:260px">
         </div>
-        <div id="launchHostHint">Starts the server + tunnel on your machine and copies the invite
-        link to your clipboard. First time? Run <code>install-host-button.ps1</code> once &mdash;
-        or just run <code>start-team-server.ps1</code> yourself.</div>
-      </div>
+      </details>
       <div class="divider">or practice alone</div>
       <div class="joinrow">
         <span class="dim">bots</span>
@@ -261,6 +256,9 @@ const COUNTDOWN = 3;
 const OVER_TIME = 6;
 const MAX_PLAYERS = 20;
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+
+// permanent team arena — the always-on Render server
+const DEFAULT_SERVER = 'bomberman-4b2w.onrender.com';
 
 const idx = (x, y) => y * COLS + x;
 const inBounds = (x, y) => x >= 0 && y >= 0 && x < COLS && y < ROWS;
@@ -1070,16 +1068,7 @@ function getName() {
 els.serverBtn.addEventListener('click', () => {
   audio();
   if (mode) return;
-  joinServer(getName(), els.serverInput.value);
-});
-document.getElementById('launchHostBtn').addEventListener('click', () => {
-  audio();
-  // hands off to the bomberman-host:// protocol handler registered by
-  // install-host-button.ps1 — the browser will ask before opening it
-  location.href = 'bomberman-host://start';
-  document.getElementById('launchHostHint').textContent =
-    'If your browser asked to open "Bomberman Host", allow it — the invite link lands on your clipboard. ' +
-    'Nothing happened? Run install-host-button.ps1 once (or start-team-server.ps1 directly).';
+  joinServer(getName(), els.serverInput.value.trim() || DEFAULT_SERVER);
 });
 els.readyBtn.addEventListener('click', () => {
   audio();

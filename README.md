@@ -7,30 +7,24 @@ works under corporate proxies like Netskope.
 
 ## Two ways to play
 
-1. **Team server:** the host runs the `bomberman-online` Node server behind a public
-   tunnel (or on any host) and shares a link like `…?server=<address>`. Everyone opens
-   the link, enters a name, hits **Connect**, then **Ready**. Match starts when
-   everyone in the lobby (2+, max 20) is ready.
+1. **Play online:** just open the site, enter a name, hit **Play online**. It connects
+   to the always-on team server (hosted on Render) — no setup, no host, nothing local.
+   Everyone who opens the link lands in the same lobby; match starts when everyone
+   (2+, max 20) is ready. Share the link and go.
 2. **Solo vs bots:** pick a bot count (3/7/11/19) and play instantly. Runs entirely in
    your browser — no network at all.
 
-## Hosting a team match
+## The always-on server
 
-On the machine that will host, from the `bomberman-online` folder:
+The team server lives in the `bomberman-server` repo, deployed to Render as a free web
+service. The Pages client points at it by default (`DEFAULT_SERVER` in `index.html`),
+so players never type an address. To move the server, redeploy and update that one
+constant (or override per session with `…?server=<host>`).
 
-```
-.\start-team-server.ps1
-```
-
-It starts the authoritative game server, opens a Cloudflare quick tunnel, and prints
-the full GitHub Pages invite link to share. Notes:
-
-- The tunnel address changes each time the tunnel restarts — share a fresh link per
-  session (the lobby's **Copy invite link** button always has the current one).
-- The host machine must stay on while people play.
-- Anyone with the link can join; the address is random but treat it as public.
-- For a permanent address, run the server on an internal VM or Azure App Service
-  instead and share `…?server=<that-host>` — nothing else changes.
+Free-tier note: the Render instance sleeps after ~15 min idle and takes ~40s to wake,
+so the first join after a quiet spell is slow, then instant for everyone. The
+`bomberman-online` folder still has the local/tunnel host scripts if ever needed
+offline.
 
 ## Gameplay
 
