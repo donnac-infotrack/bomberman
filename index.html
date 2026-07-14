@@ -67,13 +67,17 @@
   .dim{color:var(--ink-dim);font-size:11px;letter-spacing:.2em;text-transform:uppercase}
   .status{color:var(--ink-dim);font-size:12px;min-height:18px}
   .status.err{color:var(--danger)}
+  .hosthint{
+    color:var(--ink-dim);font-size:12px;max-width:46ch;line-height:1.6;
+    background:#161330;border:1px dashed #3a3462;border-radius:10px;padding:10px 14px;
+  }
+  .hosthint code{color:var(--accent);font-size:11px}
   input[type=text]{
     font-family:inherit;font-size:15px;text-align:center;letter-spacing:.08em;
     color:var(--ink);background:#181530;border:1px solid #443e6e;border-radius:10px;
     padding:11px 16px;width:220px;outline:none;
   }
   input[type=text]:focus{border-color:var(--accent)}
-  input.code{width:130px;text-transform:uppercase;letter-spacing:.3em}
   .btn{
     font-family:inherit;font-size:13px;font-weight:800;
     letter-spacing:.18em;text-transform:uppercase;
@@ -99,7 +103,7 @@
     display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center;
     background:#181530;border:1px solid #35305a;border-radius:10px;padding:8px 14px;
   }
-  .roomcode{font-size:20px;font-weight:900;letter-spacing:.35em;text-indent:.35em;color:var(--accent)}
+  .roomcode{font-size:14px;font-weight:900;letter-spacing:.08em;color:var(--accent)}
   .roster{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:640px}
   .rp{
     display:flex;align-items:center;gap:8px;
@@ -150,7 +154,7 @@
 <body>
 <header>
   <h1>Bomber<span class="b">man</span> Online</h1>
-  <div class="tagline">up to 20 bombers &middot; peer-to-peer &middot; last one standing</div>
+  <div class="tagline">up to 20 bombers &middot; last one standing</div>
 </header>
 
 <div class="cabinet">
@@ -159,20 +163,17 @@
     <canvas id="game" width="920" height="680"></canvas>
     <div class="banner hidden" id="banner"></div>
 
-    <!-- start: host or join -->
+    <!-- start -->
     <div class="overlay" id="ovStart">
       <div class="big">Enter the arena</div>
       <input type="text" id="nameInput" maxlength="14" placeholder="your name" autocomplete="off">
-      <button class="btn primary" id="hostBtn">Host a new arena</button>
-      <div class="divider">or join one</div>
       <div class="joinrow">
-        <input type="text" class="code" id="codeInput" maxlength="5" placeholder="CODE" autocomplete="off">
-        <button class="btn" id="joinBtn">Join</button>
+        <input type="text" id="serverInput" placeholder="team server address" autocomplete="off" style="width:280px">
+        <button class="btn primary" id="serverBtn">Connect</button>
       </div>
-      <div class="divider">or your team server</div>
-      <div class="joinrow">
-        <input type="text" id="serverInput" placeholder="server address (from the host)" autocomplete="off" style="width:280px">
-        <button class="btn" id="serverBtn">Connect</button>
+      <div class="hosthint">
+        Hosting today? Run <code>start-team-server.ps1</code> on your machine &mdash;
+        it starts the server, opens the tunnel, and prints the invite link to share.
       </div>
       <div class="divider">or practice alone</div>
       <div class="joinrow">
@@ -193,7 +194,7 @@
     <div class="overlay hidden" id="ovLobby">
       <div class="big">Lobby</div>
       <div class="roomline" id="roomLine">
-        <span class="dim">room</span><span class="roomcode" id="roomCode"></span>
+        <span class="dim">server</span><span class="roomcode" id="roomCode"></span>
         <button class="btn small" id="copyBtn">Copy invite link</button>
       </div>
       <div class="sub" id="lobbyInfo"></div>
@@ -235,12 +236,10 @@
 
 <footer>
   power-ups hide under crates &mdash; extra bombs, longer blasts, faster boots. after 90 seconds the arena
-  collapses inward: sudden death. the match runs in the host's browser &mdash; if the host closes their tab,
-  the arena goes with them.
+  collapses inward: sudden death. team matches run on a shared server; solo runs entirely in your browser.
 </footer>
 <div class="conn" id="conn">idle</div>
 
-<script src="peerjs.min.js"></script>
 <script>
 (() => {
 'use strict';
@@ -271,9 +270,8 @@ const PALETTE = {
   flameCore: '#ffd76a', flame: '#ff8a3d', flameDeep: '#e8542f'
 };
 
-// ================= HOST: authoritative simulation =================
-// Runs only in the browser of whoever clicked "Host". Same rules the Node
-// server used — guests just send inputs.
+// ================= LOCAL HOST: authoritative simulation =================
+// Used only by solo-vs-bots mode: the same rules the team server runs, in-browser.
 function createHost(onLocal) {
   let phase = 'lobby', phaseT = 0;
   let grid = new Array(COLS * ROWS).fill(FLOOR);
@@ -438,7 +436,7 @@ function createHost(onLocal) {
     return blasts.some(bl => bl.x === tx && bl.y === ty);
   }
 
-  // ---- bot AI (solo practice mode) ----
+  // ---- bot AI ----
   function predictedCells(bx, by, range) {
     const cells = [[bx, by]];
     for (const [dx, dy] of DIRS) {
@@ -455,7 +453,6 @@ function createHost(onLocal) {
     const s = new Set();
     for (const bl of blasts) s.add(idx(bl.x, bl.y));
     for (const b of bombs) for (const [x, y] of predictedCells(b.x, b.y, b.range)) s.add(idx(x, y));
-    // flee ahead of the sudden-death collapse
     if (sdActive) for (let i = 0; i < Math.min(8, sdQueue.length); i++) s.add(idx(sdQueue[i][0], sdQueue[i][1]));
     return s;
   }
@@ -494,15 +491,11 @@ function createHost(onLocal) {
       }
       return best;
     };
-
-    // 1) flee danger
     if (danger.has(start)) {
       const safe = nearestWhere(i => !danger.has(i));
       p.path = safe >= 0 ? reconstruct(safe) : [];
       return;
     }
-
-    // 2) consider bombing: next to a crate, or a rival is close
     const nearCrate = DIRS.some(([dx, dy]) => inBounds(ptx + dx, pty + dy) && grid[idx(ptx + dx, pty + dy)] === CRATE);
     const foeClose = [...players.values()].some(q => q !== p && q.alive && !q.spectator &&
       Math.abs(tileOf(q.x) - ptx) + Math.abs(tileOf(q.y) - pty) <= 2);
@@ -517,8 +510,6 @@ function createHost(onLocal) {
         return;
       }
     }
-
-    // 3) objective: nearest power-up, else a crate to mine, else stalk the nearest rival
     let target = -1, bd = 32767;
     for (const [k] of items) {
       const [x, y] = k.split(',').map(Number);
@@ -554,7 +545,6 @@ function createHost(onLocal) {
     if (!p.path.length) return;
     const [nx, ny] = p.path[0];
     if (solidForPlayer(nx, ny, p)) { p.path = []; p.thinkT = 0; return; }
-    // safe here but the next tile is hot: wait at the edge for flames to pass
     if (!onDanger && danger.has(idx(nx, ny))) return;
     const cx = centerOf(nx), cy = centerOf(ny);
     const dx = cx - p.x, dy = cy - p.y;
@@ -654,7 +644,7 @@ function createHost(onLocal) {
   // ---- messaging ----
   function out(p, obj) {
     if (p.bot) return;
-    p.conn ? (p.conn.open && p.conn.send(obj)) : onLocal(obj);
+    onLocal(obj);
   }
   function broadcast(obj) { for (const p of players.values()) out(p, obj); }
   function rosterMsg() {
@@ -688,14 +678,12 @@ function createHost(onLocal) {
   }
 
   function handle(sender, msg) {
-    // sender: player object or {conn} placeholder pre-join
     if (!msg || typeof msg !== 'object') return null;
     if (msg.t === 'join' && !sender.joined) {
-      if (players.size >= MAX_PLAYERS + 10) { out({ conn: sender.conn }, { t: 'full' }); return null; }
       const name = String(msg.name || '').trim().slice(0, 14) || 'Bomber';
       const hue = (90 + (joinSeq++) * 137.508) % 360;
       const p = {
-        id: nextId++, name, conn: sender.conn || null, joined: true,
+        id: nextId++, name, joined: true,
         color: 'hsl(' + hue.toFixed(0) + ' 65% 62%)',
         ready: false, spectator: phase !== 'lobby', alive: false,
         x: 0, y: 0, dir: [0, 1], moving: false,
@@ -723,18 +711,10 @@ function createHost(onLocal) {
     return p;
   }
 
-  function removePlayer(p) {
-    if (!p) return;
-    players.delete(p.id);
-    broadcastRoster();
-    if (phase === 'lobby') tryStart();
-    else checkWin();
-  }
-
   function addBot(name) {
     const hue = (90 + (joinSeq++) * 137.508) % 360;
     const p = {
-      id: nextId++, name, conn: null, bot: true, joined: true,
+      id: nextId++, name, bot: true, joined: true,
       color: 'hsl(' + hue.toFixed(0) + ' 65% 62%)',
       ready: true, spectator: false, alive: false,
       x: 0, y: 0, dir: [0, 1], moving: false,
@@ -749,14 +729,13 @@ function createHost(onLocal) {
     broadcastRoster();
   }
 
-  // ---- tick loop, driven by a Web Worker so background-tab throttling
-  // ---- can't freeze the match for everyone else ----
+  // ---- tick loop on a Web Worker so background-tab throttling can't stall it ----
   let lastT = performance.now(), acc = 0, worker = null;
   function tick() {
     const now = performance.now();
     acc += now - lastT;
     lastT = now;
-    if (acc > 1000) acc = TICK_MS; // long throttle: don't spiral, just resume
+    if (acc > 1000) acc = TICK_MS;
     while (acc >= TICK_MS) {
       acc -= TICK_MS;
       if (phase === 'countdown') {
@@ -782,21 +761,17 @@ function createHost(onLocal) {
   }
   function stop() { if (worker) worker.terminate(); }
 
-  return { handle, removePlayer, addBot, start, stop,
-           get playerCount() { return players.size; },
-           get humanCount() { return [...players.values()].filter(p => !p.bot).length; },
-           get phase() { return phase; } };
+  return { handle, addBot, start, stop };
 }
 
-// ================= CLIENT (everyone, including the host) =================
+// ================= CLIENT =================
 const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d');
 cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 
-let mode = null;            // 'host' | 'guest' | 'server'
-let peer = null, hostConn = null, host = null, localPlayer = null;
+let mode = null;            // 'solo' | 'server'
+let host = null, localPlayer = null;
 let serverWs = null, serverUrl = null;
-let roomCode = null;
 let soloMode = false, botCount = 7;
 let myId = null;
 let roster = new Map();
@@ -846,9 +821,9 @@ function burst(x, y, c, n) {
 
 // ---------- DOM ----------
 const els = {};
-['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','codeInput','hostBtn','joinBtn',
+['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','serverInput','serverBtn',
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
- 'hud','banner','conn','discSub','touchBomb','botsBtn','serverInput','serverBtn']
+ 'hud','banner','conn','discSub','touchBomb','botsBtn']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -866,10 +841,25 @@ function setConn(text, bad) {
   els.conn.textContent = text;
   els.conn.classList.toggle('bad', !!bad);
 }
+function setBusy(busy) {
+  els.serverBtn.disabled = busy;
+  els.botsBtn.disabled = busy;
+}
+function resetNet(message) {
+  if (serverWs) { try { serverWs.onclose = null; serverWs.close(); } catch (e) {} }
+  if (host) { try { host.stop(); } catch (e) {} }
+  serverWs = null; serverUrl = null; host = null; localPlayer = null;
+  mode = null; myId = null; soloMode = false;
+  roster = new Map();
+  setBusy(false);
+  if (message) setStatus(message, true);
+  setConn('idle', false);
+  showOverlay('ovStart');
+}
 
 function renderRoster() {
   const me = roster.get(myId);
-  els.roomLine.style.display = (roomCode || serverUrl) ? '' : 'none';
+  els.roomLine.style.display = serverUrl ? '' : 'none';
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
@@ -902,7 +892,6 @@ function updateHud() {
     left += '</div>';
   }
   let right = '<div class="group">';
-  if (roomCode) right += '<div class="stat"><span class="label">Room</span><span class="val">' + roomCode + '</span></div>';
   if (snap && (phase === 'play' || phase === 'countdown' || phase === 'over')) {
     const alive = snap.players.filter(p => p.a).length;
     right += '<div class="stat"><span class="label">Bombers</span><span class="val">' + alive + '/' + snap.players.length + '</span></div>' +
@@ -922,7 +911,7 @@ function showBanner(text, secs) {
   bannerT = setTimeout(() => els.banner.classList.add('hidden'), secs * 1000);
 }
 
-// ---------- server message handling (same protocol as the Node version) ----------
+// ---------- server message handling ----------
 function onPhase(p) {
   if (p === phase) return;
   phase = p;
@@ -950,7 +939,7 @@ function clientHandle(msg) {
   } else if (msg.t === 'state') {
     onSnapshot(msg);
   } else if (msg.t === 'full') {
-    setStatus('That arena is full — try again later.', true);
+    setStatus('That server is full — try again later.', true);
     showOverlay('ovStart');
   }
 }
@@ -998,14 +987,12 @@ function onSnapshot(s) {
   updateHud();
 }
 
-// ---------- sending to wherever the game runs ----------
+// ---------- transports ----------
 function sendToServer(obj) {
-  if (mode === 'host' && host && localPlayer) host.handle(localPlayer, obj);
-  else if (mode === 'guest' && hostConn && hostConn.open) hostConn.send(obj);
+  if (mode === 'solo' && host && localPlayer) host.handle(localPlayer, obj);
   else if (mode === 'server' && serverWs && serverWs.readyState === 1) serverWs.send(JSON.stringify(obj));
 }
 
-// ---------- team-server transport (WebSocket to a tunneled/hosted Node server) ----------
 function normalizeServerUrl(raw) {
   let u = (raw || '').trim().replace(/\/+$/, '');
   if (!u) return null;
@@ -1016,7 +1003,7 @@ function normalizeServerUrl(raw) {
 
 function joinServer(name, raw) {
   const url = normalizeServerUrl(raw);
-  if (!url) { setStatus('Enter the server address the host shared.', true); return; }
+  if (!url) { setStatus('Enter the server address from the invite link.', true); return; }
   setBusy(true);
   setStatus('Connecting to team server…');
   setConn('connecting', false);
@@ -1024,7 +1011,7 @@ function joinServer(name, raw) {
   const guard = setTimeout(() => {
     if (!joined) {
       try { if (serverWs) serverWs.close(); } catch (e) {}
-      resetNet('Could not reach the team server. Check the address with your host — tunnel links change when the tunnel restarts.');
+      resetNet('Could not reach the team server. Ask your host for a fresh invite link — tunnel links change when the tunnel restarts.');
     }
   }, 15000);
   let ws;
@@ -1037,7 +1024,7 @@ function joinServer(name, raw) {
   ws.onopen = () => {
     mode = 'server';
     serverUrl = url;
-    els.roomCode.textContent = 'TEAM';
+    els.roomCode.textContent = url.replace(/^wss?:\/\//i, '').slice(0, 34);
     setConn('connected to team server', false);
     ws.send(JSON.stringify({ t: 'join', name }));
     history.replaceState(null, '', inviteUrl());
@@ -1056,7 +1043,7 @@ function joinServer(name, raw) {
   ws.onclose = () => {
     clearTimeout(guard);
     if (!joined) {
-      resetNet('Could not reach the team server. Check the address with your host — tunnel links change when the tunnel restarts.');
+      resetNet('Could not reach the team server. Ask your host for a fresh invite link — tunnel links change when the tunnel restarts.');
       return;
     }
     els.discSub.textContent = 'Lost the team server. Ask the host if it is still running, then reconnect.';
@@ -1065,136 +1052,8 @@ function joinServer(name, raw) {
   };
 }
 
-// ---------- WebRTC wiring ----------
-// STUN for the normal case; TURN-over-TCP/443 relays (Open Relay, free) as the
-// fallback path on corporate networks that block UDP. Some inspection proxies
-// (Netskope, Zscaler) may still block the signaling socket itself.
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun.relay.metered.ca:80' },
-    { urls: 'turn:standard.relay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:standard.relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:standard.relay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turns:standard.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
-  ]
-};
-const PEER_OPTS = { config: RTC_CONFIG };
-
-const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-function genCode() {
-  let c = '';
-  for (let i = 0; i < 5; i++) c += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
-  return c;
-}
-const peerId = (code) => 'bmbr-arena-' + code.toLowerCase();
-
-function setBusy(busy) {
-  els.hostBtn.disabled = busy;
-  els.joinBtn.disabled = busy;
-}
-function resetNet(message) {
-  if (peer) { try { peer.destroy(); } catch (e) {} }
-  if (serverWs) { try { serverWs.onclose = null; serverWs.close(); } catch (e) {} }
-  peer = null; hostConn = null; host = null; localPlayer = null;
-  serverWs = null; serverUrl = null;
-  mode = null; myId = null; roomCode = null;
-  roster = new Map();
-  setBusy(false);
-  if (message) setStatus(message, true);
-  setConn('idle', false);
-  showOverlay('ovStart');
-}
-
-function startHost(name, attempt) {
-  const code = genCode();
-  setBusy(true);
-  setStatus('Opening arena…');
-  setConn('connecting', false);
-  peer = new Peer(peerId(code), PEER_OPTS);
-  peer.on('open', () => {
-    mode = 'host';
-    roomCode = code;
-    host = createHost(clientHandle);
-    host.start();
-    // joining our own arena delivers the roster locally, which opens the lobby
-    localPlayer = host.handle({ conn: null }, { t: 'join', name });
-    els.roomCode.textContent = code;
-    setStatus('');
-    setBusy(false);
-    setConn('hosting · relay connected', false);
-    history.replaceState(null, '', inviteUrl());
-  });
-  peer.on('connection', (conn) => {
-    let p = { conn, joined: false };
-    conn.on('data', (msg) => {
-      const res = host.handle(p, msg);
-      if (res && !p.joined) { p = res; p.joined = true; }
-    });
-    conn.on('close', () => { if (p.joined) host.removePlayer(p); });
-    conn.on('error', () => { if (p.joined) host.removePlayer(p); });
-  });
-  peer.on('error', (e) => {
-    if (mode === 'host') return; // already hosting; ignore transient relay errors
-    if (e.type === 'unavailable-id' && (attempt || 0) < 3) {
-      peer.destroy();
-      startHost(name, (attempt || 0) + 1);
-    } else {
-      resetNet('Could not open an arena (' + e.type + '). Check your connection and retry.');
-    }
-  });
-  peer.on('disconnected', () => { try { peer.reconnect(); } catch (err) {} });
-}
-
-function joinRoom(name, code) {
-  setBusy(true);
-  setStatus('Joining ' + code + '…');
-  setConn('connecting', false);
-  let joined = false;
-  // WebRTC on locked-down networks can neither connect nor error — don't hang forever
-  const guard = setTimeout(() => {
-    if (!joined) resetNet('Could not reach the host of ' + code + '. The room may be gone, or this network blocks peer-to-peer connections.');
-  }, 15000);
-  peer = new Peer(PEER_OPTS);
-  peer.on('open', () => {
-    hostConn = peer.connect(peerId(code), { reliable: true, serialization: 'json' });
-    hostConn.on('open', () => {
-      mode = 'guest';
-      roomCode = code;
-      els.roomCode.textContent = code;
-      setConn('connected to host', false);
-      hostConn.send({ t: 'join', name });
-      history.replaceState(null, '', inviteUrl());
-    });
-    hostConn.on('data', (msg) => {
-      // only count ourselves in once the host has answered — that's when the lobby opens
-      if (!joined && msg && (msg.t === 'welcome' || msg.t === 'roster')) {
-        joined = true;
-        clearTimeout(guard);
-        setStatus('');
-        setBusy(false);
-      }
-      clientHandle(msg);
-    });
-    hostConn.on('close', () => {
-      clearTimeout(guard);
-      if (!joined) { resetNet('The host dropped the connection before you got in. Try again.'); return; }
-      els.discSub.textContent = 'The host left or the connection dropped. Ask for a new room code.';
-      showOverlay('ovDisc');
-      setConn('disconnected', true);
-    });
-  });
-  peer.on('error', (e) => {
-    if (joined) return;
-    clearTimeout(guard);
-    if (e.type === 'peer-unavailable') resetNet('Room ' + code + ' not found — check the code, or ask the host if their tab is still open.');
-    else resetNet('Connection error (' + e.type + '). Corporate networks sometimes block WebRTC.');
-  });
-}
-
 function inviteUrl() {
-  if (serverUrl) return location.origin + location.pathname + '?server=' + encodeURIComponent(serverUrl.replace(/^wss?:\/\//i, ''));
-  return location.origin + location.pathname + '?room=' + roomCode;
+  return location.origin + location.pathname + '?server=' + encodeURIComponent(serverUrl.replace(/^wss?:\/\//i, ''));
 }
 
 // ---------- UI wiring ----------
@@ -1203,23 +1062,9 @@ function getName() {
   try { localStorage.setItem('bomber-name', name); } catch (e) {}
   return name;
 }
-els.hostBtn.addEventListener('click', () => {
-  audio();
-  if (peer) return;
-  startHost(getName());
-  // stay on the start screen until the arena is actually open —
-  // the first roster message flips us to the lobby
-});
-els.joinBtn.addEventListener('click', () => {
-  audio();
-  if (peer || mode) return;
-  const code = els.codeInput.value.trim().toUpperCase();
-  if (code.length !== 5) { setStatus('Room codes are 5 characters.', true); return; }
-  joinRoom(getName(), code);
-});
 els.serverBtn.addEventListener('click', () => {
   audio();
-  if (peer || mode) return;
+  if (mode) return;
   joinServer(getName(), els.serverInput.value);
 });
 els.readyBtn.addEventListener('click', () => {
@@ -1227,6 +1072,12 @@ els.readyBtn.addEventListener('click', () => {
   const me = roster.get(myId);
   if (me) sendToServer({ t: 'ready', v: !me.ready });
   else showBanner('still connecting — hang tight', 2);
+});
+els.copyBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(inviteUrl()).then(
+    () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
+    () => { els.copyBtn.textContent = inviteUrl(); }
+  );
 });
 document.querySelectorAll('#segBots button').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -1237,42 +1088,23 @@ document.querySelectorAll('#segBots button').forEach(btn => {
 });
 els.botsBtn.addEventListener('click', () => {
   audio();
-  if (peer || mode) return;
+  if (mode) return;
   soloMode = true;
-  mode = 'host';
-  roomCode = null;
+  mode = 'solo';
   setConn('solo vs bots', false);
   host = createHost(clientHandle);
   host.start();
-  localPlayer = host.handle({ conn: null }, { t: 'join', name: getName() });
+  localPlayer = host.handle({}, { t: 'join', name: getName() });
   for (let i = 1; i <= botCount; i++) host.addBot('Bot ' + i);
   sendToServer({ t: 'ready', v: true }); // everyone's ready -> straight into the countdown
 });
-els.copyBtn.addEventListener('click', () => {
-  navigator.clipboard.writeText(inviteUrl()).then(
-    () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
-    () => { els.copyBtn.textContent = inviteUrl(); }
-  );
-});
+
 try { els.nameInput.value = localStorage.getItem('bomber-name') || ''; } catch (e) {}
-const startParams = new URLSearchParams(location.search);
-const roomParam = startParams.get('room');
-const serverParam = startParams.get('server');
-if (roomParam) {
-  els.codeInput.value = roomParam.toUpperCase().slice(0, 5);
-  els.nameInput.focus();
-}
+const serverParam = new URLSearchParams(location.search).get('server');
 if (serverParam) {
   els.serverInput.value = serverParam;
   els.nameInput.focus();
 }
-
-window.addEventListener('beforeunload', (e) => {
-  if (mode === 'host' && host && host.humanCount > 1) {
-    e.preventDefault();
-    e.returnValue = '';
-  }
-});
 
 // ---------- input ----------
 const keys = [false, false, false, false];
@@ -1285,14 +1117,11 @@ const KEYMAP = {
 function sendInput() { sendToServer({ t: 'input', k: keys.map(k => k ? 1 : 0) }); }
 window.addEventListener('keydown', (e) => {
   audio();
-  const typing = document.activeElement === els.nameInput ||
-                 document.activeElement === els.codeInput ||
-                 document.activeElement === els.serverInput;
+  const typing = document.activeElement === els.nameInput || document.activeElement === els.serverInput;
   if (typing) {
     if (e.key === 'Enter') {
-      if (document.activeElement === els.serverInput || els.serverInput.value.trim()) els.serverBtn.click();
-      else if (els.codeInput.value.trim()) els.joinBtn.click();
-      else els.hostBtn.click();
+      if (els.serverInput.value.trim()) els.serverBtn.click();
+      else els.botsBtn.click();
     }
     return;
   }
