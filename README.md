@@ -42,10 +42,13 @@ The site is these three files: `index.html`, `peerjs.min.js`, `README.md`.
 
 - **The host's tab is the server.** If the host closes it, the arena dies (the page
   warns them). Refresh and host a new room.
-- **Corporate networks can block WebRTC.** Signaling uses WSS (usually fine), but the
-  peer-to-peer media path uses UDP/STUN. There's no TURN relay configured, so on
-  restrictive networks or between some VPN configurations, peers may fail to connect.
-  If that bites your team, the same game with a proper Node server is a more reliable
-  option (`bomberman-online`).
+- **Corporate networks can block WebRTC.** The peer path tries UDP first, then falls
+  back to free TURN relays over TCP/443 (Open Relay by Metered), which traverses many
+  corporate firewalls. But SSL-inspection proxies such as **Netskope or Zscaler** can
+  still block the PeerJS signaling socket (`wss://0.peerjs.com`) or the relay itself —
+  if joins consistently time out at the office, that's why. The reliable option on such
+  networks is the Node server version (`bomberman-online`) run on a machine inside the
+  office LAN: that traffic never leaves the building, so the proxy never sees it.
+  Alternatively, ask IT to allow `0.peerjs.com` and `*.relay.metered.ca`.
 - The public PeerJS broker is a free community service — fine for casual team matches,
   but it's a shared dependency with no SLA.

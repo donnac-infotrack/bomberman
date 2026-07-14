@@ -999,6 +999,21 @@ function sendToServer(obj) {
 }
 
 // ---------- WebRTC wiring ----------
+// STUN for the normal case; TURN-over-TCP/443 relays (Open Relay, free) as the
+// fallback path on corporate networks that block UDP. Some inspection proxies
+// (Netskope, Zscaler) may still block the signaling socket itself.
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun.relay.metered.ca:80' },
+    { urls: 'turn:standard.relay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:standard.relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:standard.relay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turns:standard.relay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ]
+};
+const PEER_OPTS = { config: RTC_CONFIG };
+
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 function genCode() {
   let c = '';
@@ -1027,7 +1042,7 @@ function startHost(name, attempt) {
   setBusy(true);
   setStatus('Opening arena…');
   setConn('connecting', false);
-  peer = new Peer(peerId(code));
+  peer = new Peer(peerId(code), PEER_OPTS);
   peer.on('open', () => {
     mode = 'host';
     roomCode = code;
@@ -1071,7 +1086,7 @@ function joinRoom(name, code) {
   const guard = setTimeout(() => {
     if (!joined) resetNet('Could not reach the host of ' + code + '. The room may be gone, or this network blocks peer-to-peer connections.');
   }, 15000);
-  peer = new Peer();
+  peer = new Peer(PEER_OPTS);
   peer.on('open', () => {
     hostConn = peer.connect(peerId(code), { reliable: true, serialization: 'json' });
     hostConn.on('open', () => {
