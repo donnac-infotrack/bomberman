@@ -169,6 +169,11 @@
         <input type="text" class="code" id="codeInput" maxlength="5" placeholder="CODE" autocomplete="off">
         <button class="btn" id="joinBtn">Join</button>
       </div>
+      <div class="divider">or your team server</div>
+      <div class="joinrow">
+        <input type="text" id="serverInput" placeholder="server address (from the host)" autocomplete="off" style="width:280px">
+        <button class="btn" id="serverBtn">Connect</button>
+      </div>
       <div class="divider">or practice alone</div>
       <div class="joinrow">
         <span class="dim">bots</span>
@@ -788,8 +793,9 @@ const cvs = document.getElementById('game');
 const ctx = cvs.getContext('2d');
 cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 
-let mode = null;            // 'host' | 'guest'
+let mode = null;            // 'host' | 'guest' | 'server'
 let peer = null, hostConn = null, host = null, localPlayer = null;
+let serverWs = null, serverUrl = null;
 let roomCode = null;
 let soloMode = false, botCount = 7;
 let myId = null;
@@ -842,7 +848,7 @@ function burst(x, y, c, n) {
 const els = {};
 ['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','codeInput','hostBtn','joinBtn',
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
- 'hud','banner','conn','discSub','touchBomb','botsBtn']
+ 'hud','banner','conn','discSub','touchBomb','botsBtn','serverInput','serverBtn']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -863,7 +869,7 @@ function setConn(text, bad) {
 
 function renderRoster() {
   const me = roster.get(myId);
-  els.roomLine.style.display = roomCode ? '' : 'none';
+  els.roomLine.style.display = (roomCode || serverUrl) ? '' : 'none';
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
@@ -996,6 +1002,67 @@ function onSnapshot(s) {
 function sendToServer(obj) {
   if (mode === 'host' && host && localPlayer) host.handle(localPlayer, obj);
   else if (mode === 'guest' && hostConn && hostConn.open) hostConn.send(obj);
+  else if (mode === 'server' && serverWs && serverWs.readyState === 1) serverWs.send(JSON.stringify(obj));
+}
+
+// ---------- team-server transport (WebSocket to a tunneled/hosted Node server) ----------
+function normalizeServerUrl(raw) {
+  let u = (raw || '').trim().replace(/\/+$/, '');
+  if (!u) return null;
+  if (/^https?:\/\//i.test(u)) u = u.replace(/^http/i, 'ws');
+  else if (!/^wss?:\/\//i.test(u)) u = 'wss://' + u;
+  return u;
+}
+
+function joinServer(name, raw) {
+  const url = normalizeServerUrl(raw);
+  if (!url) { setStatus('Enter the server address the host shared.', true); return; }
+  setBusy(true);
+  setStatus('Connecting to team server…');
+  setConn('connecting', false);
+  let joined = false;
+  const guard = setTimeout(() => {
+    if (!joined) {
+      try { if (serverWs) serverWs.close(); } catch (e) {}
+      resetNet('Could not reach the team server. Check the address with your host — tunnel links change when the tunnel restarts.');
+    }
+  }, 15000);
+  let ws;
+  try { ws = new WebSocket(url); } catch (e) {
+    clearTimeout(guard);
+    resetNet('That does not look like a valid server address.');
+    return;
+  }
+  serverWs = ws;
+  ws.onopen = () => {
+    mode = 'server';
+    serverUrl = url;
+    els.roomCode.textContent = 'TEAM';
+    setConn('connected to team server', false);
+    ws.send(JSON.stringify({ t: 'join', name }));
+    history.replaceState(null, '', inviteUrl());
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch (e) { return; }
+    if (!joined && msg && (msg.t === 'welcome' || msg.t === 'roster')) {
+      joined = true;
+      clearTimeout(guard);
+      setStatus('');
+      setBusy(false);
+    }
+    clientHandle(msg);
+  };
+  ws.onclose = () => {
+    clearTimeout(guard);
+    if (!joined) {
+      resetNet('Could not reach the team server. Check the address with your host — tunnel links change when the tunnel restarts.');
+      return;
+    }
+    els.discSub.textContent = 'Lost the team server. Ask the host if it is still running, then reconnect.';
+    showOverlay('ovDisc');
+    setConn('disconnected', true);
+  };
 }
 
 // ---------- WebRTC wiring ----------
@@ -1028,7 +1095,9 @@ function setBusy(busy) {
 }
 function resetNet(message) {
   if (peer) { try { peer.destroy(); } catch (e) {} }
+  if (serverWs) { try { serverWs.onclose = null; serverWs.close(); } catch (e) {} }
   peer = null; hostConn = null; host = null; localPlayer = null;
+  serverWs = null; serverUrl = null;
   mode = null; myId = null; roomCode = null;
   roster = new Map();
   setBusy(false);
@@ -1124,6 +1193,7 @@ function joinRoom(name, code) {
 }
 
 function inviteUrl() {
+  if (serverUrl) return location.origin + location.pathname + '?server=' + encodeURIComponent(serverUrl.replace(/^wss?:\/\//i, ''));
   return location.origin + location.pathname + '?room=' + roomCode;
 }
 
@@ -1142,10 +1212,15 @@ els.hostBtn.addEventListener('click', () => {
 });
 els.joinBtn.addEventListener('click', () => {
   audio();
-  if (peer) return;
+  if (peer || mode) return;
   const code = els.codeInput.value.trim().toUpperCase();
   if (code.length !== 5) { setStatus('Room codes are 5 characters.', true); return; }
   joinRoom(getName(), code);
+});
+els.serverBtn.addEventListener('click', () => {
+  audio();
+  if (peer || mode) return;
+  joinServer(getName(), els.serverInput.value);
 });
 els.readyBtn.addEventListener('click', () => {
   audio();
@@ -1180,9 +1255,15 @@ els.copyBtn.addEventListener('click', () => {
   );
 });
 try { els.nameInput.value = localStorage.getItem('bomber-name') || ''; } catch (e) {}
-const roomParam = new URLSearchParams(location.search).get('room');
+const startParams = new URLSearchParams(location.search);
+const roomParam = startParams.get('room');
+const serverParam = startParams.get('server');
 if (roomParam) {
   els.codeInput.value = roomParam.toUpperCase().slice(0, 5);
+  els.nameInput.focus();
+}
+if (serverParam) {
+  els.serverInput.value = serverParam;
   els.nameInput.focus();
 }
 
@@ -1204,9 +1285,15 @@ const KEYMAP = {
 function sendInput() { sendToServer({ t: 'input', k: keys.map(k => k ? 1 : 0) }); }
 window.addEventListener('keydown', (e) => {
   audio();
-  const typing = document.activeElement === els.nameInput || document.activeElement === els.codeInput;
+  const typing = document.activeElement === els.nameInput ||
+                 document.activeElement === els.codeInput ||
+                 document.activeElement === els.serverInput;
   if (typing) {
-    if (e.key === 'Enter') (els.codeInput.value.trim() ? els.joinBtn : els.hostBtn).click();
+    if (e.key === 'Enter') {
+      if (document.activeElement === els.serverInput || els.serverInput.value.trim()) els.serverBtn.click();
+      else if (els.codeInput.value.trim()) els.joinBtn.click();
+      else els.hostBtn.click();
+    }
     return;
   }
   if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
