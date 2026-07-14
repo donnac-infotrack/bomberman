@@ -5,6 +5,16 @@ fully static site. No game server: one player clicks **Host a new arena** and th
 browser runs the authoritative simulation; everyone else joins peer-to-peer over
 WebRTC data channels using a 5-character room code (or the invite link).
 
+## Three ways to play
+
+1. **Team server (works everywhere, incl. corporate networks):** someone runs the
+   `bomberman-online` Node server behind a public tunnel or host and shares a link like
+   `…github.io/bomberman/?server=<host>`. The client connects over plain WSS — to
+   proxies like Netskope it's ordinary web traffic. Same wire protocol, same game.
+2. **Peer-to-peer rooms:** host a room, share the 5-character code. Works on unmanaged
+   home networks; endpoint proxies (Netskope/Zscaler) usually break it — see below.
+3. **Solo vs bots:** fully local, works everywhere, no network at all.
+
 ## How to play
 
 1. Open the site. Enter a name.
