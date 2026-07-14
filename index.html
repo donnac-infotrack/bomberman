@@ -88,6 +88,11 @@
   .btn.primary:hover{background:#ffc76e}
   .btn.small{padding:7px 14px;font-size:11px}
   .joinrow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center}
+  .seg{display:inline-flex;border:1px solid #443e6e;border-radius:8px;overflow:hidden}
+  .seg button{font-family:inherit;font-size:12px;font-weight:700;color:var(--ink-dim);background:#181530;border:none;padding:8px 12px;cursor:pointer}
+  .seg button + button{border-left:1px solid #443e6e}
+  .seg button.sel{background:var(--accent);color:#3a2405}
+  .seg button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
   .divider{display:flex;align-items:center;gap:12px;color:var(--ink-dim);font-size:10px;letter-spacing:.3em;width:280px}
   .divider::before,.divider::after{content:'';flex:1;height:1px;background:#35305a}
   .roomline{
@@ -164,6 +169,14 @@
         <input type="text" class="code" id="codeInput" maxlength="5" placeholder="CODE" autocomplete="off">
         <button class="btn" id="joinBtn">Join</button>
       </div>
+      <div class="divider">or practice alone</div>
+      <div class="joinrow">
+        <span class="dim">bots</span>
+        <div class="seg" id="segBots">
+          <button data-n="3">3</button><button data-n="7" class="sel">7</button><button data-n="11">11</button><button data-n="19">19</button>
+        </div>
+        <button class="btn" id="botsBtn">Play vs bots</button>
+      </div>
       <div class="status" id="startStatus"></div>
       <div class="keys">
         <span><b>WASD</b>/<b>&#8592;&#8593;&#8595;&#8594;</b> move</span>
@@ -174,7 +187,7 @@
     <!-- lobby -->
     <div class="overlay hidden" id="ovLobby">
       <div class="big">Lobby</div>
-      <div class="roomline">
+      <div class="roomline" id="roomLine">
         <span class="dim">room</span><span class="roomcode" id="roomCode"></span>
         <button class="btn small" id="copyBtn">Copy invite link</button>
       </div>
@@ -335,6 +348,7 @@ function createHost(onLocal) {
       p.x = centerOf(p.spawn[0]); p.y = centerOf(p.spawn[1]);
       p.dir = [0, 1];
       p.keys = { up: false, down: false, left: false, right: false };
+      if (p.bot) { p.cool = 1 + Math.random() * 2; p.thinkT = Math.random() * 0.3; p.path = []; }
     }
   }
 
@@ -419,6 +433,131 @@ function createHost(onLocal) {
     return blasts.some(bl => bl.x === tx && bl.y === ty);
   }
 
+  // ---- bot AI (solo practice mode) ----
+  function predictedCells(bx, by, range) {
+    const cells = [[bx, by]];
+    for (const [dx, dy] of DIRS) {
+      for (let r = 1; r <= range; r++) {
+        const x = bx + dx * r, y = by + dy * r;
+        if (!inBounds(x, y) || grid[idx(x, y)] === WALL) break;
+        cells.push([x, y]);
+        if (grid[idx(x, y)] === CRATE || items.has(key(x, y))) break;
+      }
+    }
+    return cells;
+  }
+  function computeDanger() {
+    const s = new Set();
+    for (const bl of blasts) s.add(idx(bl.x, bl.y));
+    for (const b of bombs) for (const [x, y] of predictedCells(b.x, b.y, b.range)) s.add(idx(x, y));
+    // flee ahead of the sudden-death collapse
+    if (sdActive) for (let i = 0; i < Math.min(8, sdQueue.length); i++) s.add(idx(sdQueue[i][0], sdQueue[i][1]));
+    return s;
+  }
+  function bfs(sx, sy, p) {
+    const n = COLS * ROWS;
+    const dist = new Int16Array(n).fill(-1);
+    const prev = new Int32Array(n).fill(-1);
+    const q = [idx(sx, sy)];
+    dist[q[0]] = 0;
+    for (let h = 0; h < q.length; h++) {
+      const c = q[h], x = c % COLS, y = (c / COLS) | 0;
+      for (const [dx, dy] of DIRS) {
+        const nx = x + dx, ny = y + dy;
+        if (!inBounds(nx, ny)) continue;
+        const i = idx(nx, ny);
+        if (dist[i] !== -1 || solidForPlayer(nx, ny, p)) continue;
+        dist[i] = dist[c] + 1; prev[i] = c; q.push(i);
+      }
+    }
+    return { dist, prev };
+  }
+  function botThink(p, danger) {
+    const ptx = tileOf(p.x), pty = tileOf(p.y), start = idx(ptx, pty);
+    const { dist, prev } = bfs(ptx, pty, p);
+    const reconstruct = (ti) => {
+      const path = [];
+      let c = ti;
+      while (c !== start && c !== -1) { path.push([c % COLS, (c / COLS) | 0]); c = prev[c]; }
+      path.reverse();
+      return path;
+    };
+    const nearestWhere = (ok) => {
+      let best = -1, bd = 32767;
+      for (let i = 0; i < dist.length; i++) {
+        if (dist[i] >= 0 && dist[i] < bd && ok(i)) { bd = dist[i]; best = i; }
+      }
+      return best;
+    };
+
+    // 1) flee danger
+    if (danger.has(start)) {
+      const safe = nearestWhere(i => !danger.has(i));
+      p.path = safe >= 0 ? reconstruct(safe) : [];
+      return;
+    }
+
+    // 2) consider bombing: next to a crate, or a rival is close
+    const nearCrate = DIRS.some(([dx, dy]) => inBounds(ptx + dx, pty + dy) && grid[idx(ptx + dx, pty + dy)] === CRATE);
+    const foeClose = [...players.values()].some(q => q !== p && q.alive && !q.spectator &&
+      Math.abs(tileOf(q.x) - ptx) + Math.abs(tileOf(q.y) - pty) <= 2);
+    if ((nearCrate || foeClose) && p.cool <= 0 && Math.random() < p.aggr) {
+      const d2 = new Set(danger);
+      for (const [x, y] of predictedCells(ptx, pty, p.range)) d2.add(idx(x, y));
+      const escape = nearestWhere(i => dist[i] <= 5 && !d2.has(i));
+      if (escape >= 0) {
+        dropBomb(p);
+        p.cool = 1.2 + Math.random() * 1.8;
+        p.path = reconstruct(escape);
+        return;
+      }
+    }
+
+    // 3) objective: nearest power-up, else a crate to mine, else stalk the nearest rival
+    let target = -1, bd = 32767;
+    for (const [k] of items) {
+      const [x, y] = k.split(',').map(Number);
+      const i = idx(x, y);
+      if (dist[i] >= 0 && dist[i] < bd && !danger.has(i)) { bd = dist[i]; target = i; }
+    }
+    if (target === -1) {
+      target = nearestWhere(i => {
+        if (danger.has(i)) return false;
+        const x = i % COLS, y = (i / COLS) | 0;
+        return DIRS.some(([dx, dy]) => inBounds(x + dx, y + dy) && grid[idx(x + dx, y + dy)] === CRATE);
+      });
+    }
+    if (target === -1) {
+      let fd = 32767;
+      for (const q of players.values()) {
+        if (q === p || !q.alive || q.spectator) continue;
+        const i = idx(tileOf(q.x), tileOf(q.y));
+        if (dist[i] >= 0 && dist[i] < fd) { fd = dist[i]; target = i; }
+      }
+    }
+    p.path = (target >= 0 && target !== start) ? reconstruct(target).slice(0, 6) : [];
+  }
+  function botDrive(p, dt, danger) {
+    p.keys.up = p.keys.down = p.keys.left = p.keys.right = false;
+    p.thinkT -= dt;
+    p.cool -= dt;
+    const onDanger = danger.has(idx(tileOf(p.x), tileOf(p.y)));
+    if (p.thinkT <= 0 || !p.path.length || onDanger && p.thinkT > 0.15) {
+      botThink(p, danger);
+      p.thinkT = onDanger ? 0.15 : 0.3 + Math.random() * 0.3;
+    }
+    if (!p.path.length) return;
+    const [nx, ny] = p.path[0];
+    if (solidForPlayer(nx, ny, p)) { p.path = []; p.thinkT = 0; return; }
+    // safe here but the next tile is hot: wait at the edge for flames to pass
+    if (!onDanger && danger.has(idx(nx, ny))) return;
+    const cx = centerOf(nx), cy = centerOf(ny);
+    const dx = cx - p.x, dy = cy - p.y;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { p.path.shift(); return; }
+    if (Math.abs(dx) > Math.abs(dy)) p.keys[dx > 0 ? 'right' : 'left'] = true;
+    else p.keys[dy > 0 ? 'down' : 'up'] = true;
+  }
+
   function updateSuddenDeath(dt) {
     if (!sdActive && roundTime >= SUDDEN_AT) {
       sdActive = true;
@@ -443,6 +582,13 @@ function createHost(onLocal) {
   function simulate(dt) {
     roundTime += dt;
     updateSuddenDeath(dt);
+    let danger = null;
+    for (const p of players.values()) {
+      if (p.bot && p.alive && !p.spectator) {
+        if (!danger) danger = computeDanger();
+        botDrive(p, dt, danger);
+      }
+    }
     for (const p of players.values()) if (p.alive && !p.spectator) movePlayer(p, dt);
     for (const b of bombs) {
       for (const id of [...b.soft]) {
@@ -485,7 +631,7 @@ function createHost(onLocal) {
   function toLobby() {
     phase = 'lobby'; phaseT = 0; winner = null;
     bombs = []; blasts = []; items = new Map();
-    for (const p of players.values()) { p.ready = false; p.spectator = false; p.alive = false; }
+    for (const p of players.values()) { p.ready = !!p.bot; p.spectator = false; p.alive = false; }
     broadcastRoster();
   }
 
@@ -501,7 +647,10 @@ function createHost(onLocal) {
   }
 
   // ---- messaging ----
-  function out(p, obj) { p.conn ? (p.conn.open && p.conn.send(obj)) : onLocal(obj); }
+  function out(p, obj) {
+    if (p.bot) return;
+    p.conn ? (p.conn.open && p.conn.send(obj)) : onLocal(obj);
+  }
   function broadcast(obj) { for (const p of players.values()) out(p, obj); }
   function rosterMsg() {
     return {
@@ -577,6 +726,24 @@ function createHost(onLocal) {
     else checkWin();
   }
 
+  function addBot(name) {
+    const hue = (90 + (joinSeq++) * 137.508) % 360;
+    const p = {
+      id: nextId++, name, conn: null, bot: true, joined: true,
+      color: 'hsl(' + hue.toFixed(0) + ' 65% 62%)',
+      ready: true, spectator: false, alive: false,
+      x: 0, y: 0, dir: [0, 1], moving: false,
+      maxBombs: 1, range: 1, speedLvl: 1, spawn: [1, 1],
+      keys: { up: false, down: false, left: false, right: false },
+      aggr: 0.45 + Math.random() * 0.4,
+      cool: 1 + Math.random() * 2,
+      thinkT: Math.random() * 0.3,
+      path: []
+    };
+    players.set(p.id, p);
+    broadcastRoster();
+  }
+
   // ---- tick loop, driven by a Web Worker so background-tab throttling
   // ---- can't freeze the match for everyone else ----
   let lastT = performance.now(), acc = 0, worker = null;
@@ -610,8 +777,9 @@ function createHost(onLocal) {
   }
   function stop() { if (worker) worker.terminate(); }
 
-  return { handle, removePlayer, start, stop,
+  return { handle, removePlayer, addBot, start, stop,
            get playerCount() { return players.size; },
+           get humanCount() { return [...players.values()].filter(p => !p.bot).length; },
            get phase() { return phase; } };
 }
 
@@ -623,6 +791,7 @@ cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 let mode = null;            // 'host' | 'guest'
 let peer = null, hostConn = null, host = null, localPlayer = null;
 let roomCode = null;
+let soloMode = false, botCount = 7;
 let myId = null;
 let roster = new Map();
 let phase = 'start';
@@ -672,8 +841,8 @@ function burst(x, y, c, n) {
 // ---------- DOM ----------
 const els = {};
 ['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','codeInput','hostBtn','joinBtn',
- 'startStatus','roomCode','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
- 'hud','banner','conn','discSub','touchBomb']
+ 'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
+ 'hud','banner','conn','discSub','touchBomb','botsBtn']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -694,6 +863,7 @@ function setConn(text, bad) {
 
 function renderRoster() {
   const me = roster.get(myId);
+  els.roomLine.style.display = roomCode ? '' : 'none';
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
@@ -701,9 +871,11 @@ function renderRoster() {
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
     '</div>').join('');
   const n = roster.size;
-  els.lobbyInfo.textContent = n < 2
-    ? 'Waiting for teammates — send them the invite link. ' + n + '/' + MAX_PLAYERS + ' joined.'
-    : n + '/' + MAX_PLAYERS + ' bombers in the lobby.';
+  els.lobbyInfo.textContent = soloMode
+    ? 'You vs ' + (n - 1) + ' bots — ready up for the next round.'
+    : n < 2
+      ? 'Waiting for teammates — send them the invite link. ' + n + '/' + MAX_PLAYERS + ' joined.'
+      : n + '/' + MAX_PLAYERS + ' bombers in the lobby.';
   if (me) {
     els.readyBtn.textContent = me.ready ? 'Not ready' : 'Ready';
     els.readyBtn.classList.toggle('primary', !me.ready);
@@ -966,6 +1138,26 @@ els.readyBtn.addEventListener('click', () => {
   if (me) sendToServer({ t: 'ready', v: !me.ready });
   else showBanner('still connecting — hang tight', 2);
 });
+document.querySelectorAll('#segBots button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#segBots button').forEach(b => b.classList.remove('sel'));
+    btn.classList.add('sel');
+    botCount = parseInt(btn.dataset.n, 10);
+  });
+});
+els.botsBtn.addEventListener('click', () => {
+  audio();
+  if (peer || mode) return;
+  soloMode = true;
+  mode = 'host';
+  roomCode = null;
+  setConn('solo vs bots', false);
+  host = createHost(clientHandle);
+  host.start();
+  localPlayer = host.handle({ conn: null }, { t: 'join', name: getName() });
+  for (let i = 1; i <= botCount; i++) host.addBot('Bot ' + i);
+  sendToServer({ t: 'ready', v: true }); // everyone's ready -> straight into the countdown
+});
 els.copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(inviteUrl()).then(
     () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
@@ -980,7 +1172,7 @@ if (roomParam) {
 }
 
 window.addEventListener('beforeunload', (e) => {
-  if (mode === 'host' && host && host.playerCount > 1) {
+  if (mode === 'host' && host && host.humanCount > 1) {
     e.preventDefault();
     e.returnValue = '';
   }
