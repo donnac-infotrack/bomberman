@@ -115,6 +115,13 @@
   .rp .rdy.yes{color:#7ee2a0}
   .rp .rdy.no{color:var(--ink-dim)}
   .rp .spec{font-size:10px;color:var(--ink-dim);letter-spacing:.12em}
+  .rp .kick{
+    font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--danger);background:transparent;border:1px solid #5a3040;border-radius:5px;
+    padding:2px 7px;margin-left:2px;cursor:pointer;
+  }
+  .rp .kick:hover,.rp .kick:focus-visible{background:var(--danger);color:#33070d;outline:none}
+  .rp .adminstar{color:var(--accent);font-size:11px}
   .countnum{
     font-size:clamp(60px,14vw,110px);font-weight:900;color:var(--accent);
     text-shadow:0 0 40px rgba(255,138,61,.6);line-height:1;
@@ -863,12 +870,23 @@ function resetNet(message) {
 function renderRoster() {
   const me = roster.get(myId);
   els.roomLine.style.display = serverUrl ? '' : 'none';
+  const iAmAdmin = mode === 'server' && me && me.admin;
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
+    (p.admin ? '<span class="adminstar" title="moderator">&#9733;</span>' : '') +
     (p.spectator ? '<span class="spec">watching</span>'
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
+    (iAmAdmin && p.id !== myId ? '<button class="kick" data-kick="' + p.id + '">kick</button>' : '') +
     '</div>').join('');
+  if (iAmAdmin) {
+    els.roster.querySelectorAll('.kick').forEach(btn => {
+      btn.addEventListener('click', () => {
+        audio();
+        sendToServer({ t: 'kick', id: parseInt(btn.dataset.kick, 10) });
+      });
+    });
+  }
   const n = roster.size;
   els.lobbyInfo.textContent = soloMode
     ? 'You vs ' + (n - 1) + ' bots — ready up for the next round.'
@@ -941,6 +959,12 @@ function clientHandle(msg) {
     updateHud();
   } else if (msg.t === 'state') {
     onSnapshot(msg);
+  } else if (msg.t === 'kicked') {
+    const by = msg.by ? esc(msg.by) : 'the moderator';
+    resetNet('');
+    els.discSub.textContent = 'You were kicked by ' + by + '.';
+    showOverlay('ovDisc');
+    setConn('kicked', true);
   } else if (msg.t === 'full') {
     setStatus('That server is full — try again later.', true);
     showOverlay('ovStart');
