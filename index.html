@@ -172,8 +172,13 @@
         <button class="btn primary" id="serverBtn">Connect</button>
       </div>
       <div class="hosthint">
-        Hosting today? Run <code>start-team-server.ps1</code> on your machine &mdash;
-        it starts the server, opens the tunnel, and prints the invite link to share.
+        <div class="joinrow" style="margin-bottom:6px">
+          <span>Hosting today?</span>
+          <button class="btn small" id="launchHostBtn">Launch host</button>
+        </div>
+        <div id="launchHostHint">Starts the server + tunnel on your machine and copies the invite
+        link to your clipboard. First time? Run <code>install-host-button.ps1</code> once &mdash;
+        or just run <code>start-team-server.ps1</code> yourself.</div>
       </div>
       <div class="divider">or practice alone</div>
       <div class="joinrow">
@@ -1066,6 +1071,15 @@ els.serverBtn.addEventListener('click', () => {
   audio();
   if (mode) return;
   joinServer(getName(), els.serverInput.value);
+});
+document.getElementById('launchHostBtn').addEventListener('click', () => {
+  audio();
+  // hands off to the bomberman-host:// protocol handler registered by
+  // install-host-button.ps1 — the browser will ask before opening it
+  location.href = 'bomberman-host://start';
+  document.getElementById('launchHostHint').textContent =
+    'If your browser asked to open "Bomberman Host", allow it — the invite link lands on your clipboard. ' +
+    'Nothing happened? Run install-host-button.ps1 once (or start-team-server.ps1 directly).';
 });
 els.readyBtn.addEventListener('click', () => {
   audio();
