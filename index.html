@@ -78,6 +78,8 @@
     padding:11px 16px;width:220px;outline:none;
   }
   input[type=text]:focus{border-color:var(--accent)}
+  input.code{text-transform:uppercase;letter-spacing:.22em}
+  input.code::placeholder{letter-spacing:.08em;text-transform:none}
   .btn{
     font-family:inherit;font-size:13px;font-weight:800;
     letter-spacing:.18em;text-transform:uppercase;
@@ -174,8 +176,11 @@
     <div class="overlay" id="ovStart">
       <div class="big">Enter the arena</div>
       <input type="text" id="nameInput" maxlength="14" placeholder="your name" autocomplete="off">
-      <button class="btn primary" id="serverBtn">Play online</button>
-      <div class="hosthint" id="serverHint">Connects to the team arena &mdash; play with anyone who opens this link.</div>
+      <div class="joinrow">
+        <input type="text" id="roomInput" maxlength="12" class="code" placeholder="room (optional)" autocomplete="off" style="width:180px">
+        <button class="btn primary" id="serverBtn">Play online</button>
+      </div>
+      <div class="hosthint" id="serverHint">Same room code = same arena. Leave it blank to join the main room; pick a code so your team plays on its own.</div>
       <details class="hosthint" id="advBox">
         <summary style="cursor:pointer;letter-spacing:.12em">use a different server</summary>
         <div class="joinrow" style="margin-top:8px">
@@ -201,7 +206,7 @@
     <div class="overlay hidden" id="ovLobby">
       <div class="big">Lobby</div>
       <div class="roomline" id="roomLine">
-        <span class="dim">server</span><span class="roomcode" id="roomCode"></span>
+        <span class="dim">room</span><span class="roomcode" id="roomCode"></span>
         <button class="btn small" id="copyBtn">Copy invite link</button>
       </div>
       <div class="sub" id="lobbyInfo"></div>
@@ -781,7 +786,7 @@ cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 
 let mode = null;            // 'solo' | 'server'
 let host = null, localPlayer = null;
-let serverWs = null, serverUrl = null;
+let serverWs = null, serverUrl = null, joinedRoom = null;
 let soloMode = false, botCount = 7;
 let myId = null;
 let roster = new Map();
@@ -831,7 +836,7 @@ function burst(x, y, c, n) {
 
 // ---------- DOM ----------
 const els = {};
-['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','serverInput','serverBtn',
+['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','serverInput','roomInput','serverBtn',
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
  'hud','banner','conn','discSub','touchBomb','botsBtn']
   .forEach(id => els[id] = document.getElementById(id));
@@ -858,7 +863,7 @@ function setBusy(busy) {
 function resetNet(message) {
   if (serverWs) { try { serverWs.onclose = null; serverWs.close(); } catch (e) {} }
   if (host) { try { host.stop(); } catch (e) {} }
-  serverWs = null; serverUrl = null; host = null; localPlayer = null;
+  serverWs = null; serverUrl = null; joinedRoom = null; host = null; localPlayer = null;
   mode = null; myId = null; soloMode = false;
   roster = new Map();
   setBusy(false);
@@ -952,7 +957,9 @@ function clientHandle(msg) {
   if (!msg || typeof msg !== 'object') return;
   if (msg.t === 'welcome') {
     myId = msg.id;
+    if (msg.room) { joinedRoom = msg.room; els.roomCode.textContent = msg.room; }
   } else if (msg.t === 'roster') {
+    if (msg.room) { joinedRoom = msg.room; els.roomCode.textContent = msg.room; }
     roster = new Map(msg.players.map(p => [p.id, p]));
     onPhase(msg.phase);
     renderRoster();
@@ -1028,9 +1035,10 @@ function normalizeServerUrl(raw) {
   return u;
 }
 
-function joinServer(name, raw) {
+function joinServer(name, raw, room) {
   const url = normalizeServerUrl(raw);
   if (!url) { setStatus('Enter the server address from the invite link.', true); return; }
+  const roomCode = String(room || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
   setBusy(true);
   setStatus('Connecting to team server…');
   setConn('connecting', false);
@@ -1051,10 +1059,10 @@ function joinServer(name, raw) {
   ws.onopen = () => {
     mode = 'server';
     serverUrl = url;
-    els.roomCode.textContent = url.replace(/^wss?:\/\//i, '').slice(0, 34);
     setConn('connected to team server', false);
-    ws.send(JSON.stringify({ t: 'join', name }));
-    history.replaceState(null, '', inviteUrl());
+    ws.send(JSON.stringify({ t: 'join', name, room: roomCode }));
+    // authoritative room name arrives in welcome/roster; provisional until then
+    if (roomCode) { joinedRoom = roomCode; els.roomCode.textContent = roomCode; }
   };
   ws.onmessage = (ev) => {
     let msg;
@@ -1080,7 +1088,11 @@ function joinServer(name, raw) {
 }
 
 function inviteUrl() {
-  return location.origin + location.pathname + '?server=' + encodeURIComponent(serverUrl.replace(/^wss?:\/\//i, ''));
+  const params = [];
+  const host = (serverUrl || '').replace(/^wss?:\/\//i, '');
+  if (host && host !== DEFAULT_SERVER) params.push('server=' + encodeURIComponent(host));
+  if (joinedRoom && joinedRoom !== 'MAIN') params.push('room=' + encodeURIComponent(joinedRoom));
+  return location.origin + location.pathname + (params.length ? '?' + params.join('&') : '');
 }
 
 // ---------- UI wiring ----------
@@ -1092,7 +1104,7 @@ function getName() {
 els.serverBtn.addEventListener('click', () => {
   audio();
   if (mode) return;
-  joinServer(getName(), els.serverInput.value.trim() || DEFAULT_SERVER);
+  joinServer(getName(), els.serverInput.value.trim() || DEFAULT_SERVER, els.roomInput.value);
 });
 els.readyBtn.addEventListener('click', () => {
   audio();
@@ -1127,11 +1139,12 @@ els.botsBtn.addEventListener('click', () => {
 });
 
 try { els.nameInput.value = localStorage.getItem('bomber-name') || ''; } catch (e) {}
-const serverParam = new URLSearchParams(location.search).get('server');
-if (serverParam) {
-  els.serverInput.value = serverParam;
-  els.nameInput.focus();
-}
+const startParams = new URLSearchParams(location.search);
+const serverParam = startParams.get('server');
+const roomParam = startParams.get('room');
+if (serverParam) els.serverInput.value = serverParam;
+if (roomParam) els.roomInput.value = roomParam.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+els.nameInput.focus();
 
 // ---------- input ----------
 const keys = [false, false, false, false];
@@ -1144,12 +1157,11 @@ const KEYMAP = {
 function sendInput() { sendToServer({ t: 'input', k: keys.map(k => k ? 1 : 0) }); }
 window.addEventListener('keydown', (e) => {
   audio();
-  const typing = document.activeElement === els.nameInput || document.activeElement === els.serverInput;
+  const typing = document.activeElement === els.nameInput ||
+                 document.activeElement === els.serverInput ||
+                 document.activeElement === els.roomInput;
   if (typing) {
-    if (e.key === 'Enter') {
-      if (els.serverInput.value.trim()) els.serverBtn.click();
-      else els.botsBtn.click();
-    }
+    if (e.key === 'Enter') els.serverBtn.click();   // Enter = Play online
     return;
   }
   if (['ArrowLeft','ArrowRight','ArrowUp','ArrowDown',' '].includes(e.key)) e.preventDefault();
