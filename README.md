@@ -7,10 +7,14 @@ works under corporate proxies like Netskope.
 
 ## Two ways to play
 
-1. **Play online:** just open the site, enter a name, hit **Play online**. It connects
-   to the always-on team server (hosted on Render) — no setup, no host, nothing local.
-   Everyone who opens the link lands in the same lobby; match starts when everyone
-   (2+, max 20) is ready. Share the link and go.
+1. **Play online:** open the site, enter a name, hit **Play online**. It connects to the
+   always-on team server (hosted on Render) — no setup, no host, nothing local. Match
+   starts when everyone in the room (2+, max 20) is ready.
+   - **Rooms:** leave the room field blank to join the shared **MAIN** room, or type a
+     code (e.g. `ALPHA`) so your team plays on its own arena — same code = same game,
+     different codes run at the same time (up to 200 rooms). The lobby's **Copy invite
+     link** shares a `…?room=CODE` link that drops teammates straight into your room.
+   - The first player in a room and anyone named **Dunix** can kick players.
 2. **Solo vs bots:** pick a bot count (3/7/11/19) and play instantly. Runs entirely in
    your browser — no network at all.
 
