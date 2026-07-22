@@ -15,6 +15,10 @@ works under corporate proxies like Netskope.
      different codes run at the same time (up to 200 rooms). The lobby's **Copy invite
      link** shares a `…?room=CODE` link that drops teammates straight into your room.
    - The first player in a room and anyone named **Dunix** can kick players.
+   - **Free-for-all or Team:** the room host toggles the mode in the lobby. In
+     **Team** mode everyone picks Red or Blue; teammates spawn together, friendly fire
+     is off (your blasts spare teammates — but can still catch you), and the last team
+     with anyone alive wins. Starting needs a player on each team.
 2. **Solo vs bots:** pick a bot count (3/7/11/19) and play instantly. Runs entirely in
    your browser — no network at all.
 
