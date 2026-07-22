@@ -106,6 +106,16 @@
     background:#181530;border:1px solid #35305a;border-radius:10px;padding:8px 14px;
   }
   .roomcode{font-size:14px;font-weight:900;letter-spacing:.08em;color:var(--accent)}
+  .modeline,.teamline{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;
+    font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
+  .teamline.hidden,.modeline.hidden{display:none}
+  #segMode button[disabled]{cursor:default;opacity:.9}
+  .btn.teamR{border-color:#8a3040;color:#ff9aa6}
+  .btn.teamR.on{background:var(--p2);color:#33070d;border-color:#a83a4a}
+  .btn.teamB{border-color:#31468a;color:#a9c0ff}
+  .btn.teamB.on{background:var(--p1);color:#0b1230;border-color:#3a55a8}
+  .rp .teamtag{font-size:10px;font-weight:800;letter-spacing:.06em}
+  .rp .teamtag.R{color:var(--p2)} .rp .teamtag.B{color:var(--p1)}
   .roster{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:640px}
   .rp{
     display:flex;align-items:center;gap:8px;
@@ -209,10 +219,21 @@
         <span class="dim">room</span><span class="roomcode" id="roomCode"></span>
         <button class="btn small" id="copyBtn">Copy invite link</button>
       </div>
+      <div class="modeline" id="modeLine">
+        <span class="dim">mode</span>
+        <div class="seg" id="segMode">
+          <button data-m="ffa" class="sel">Free-for-all</button><button data-m="team">Team &mdash; Red vs Blue</button>
+        </div>
+      </div>
+      <div class="teamline hidden" id="teamLine">
+        <span class="dim">your team</span>
+        <button class="btn small teamR" id="joinR">Red</button>
+        <button class="btn small teamB" id="joinB">Blue</button>
+      </div>
       <div class="sub" id="lobbyInfo"></div>
       <div class="roster" id="roster"></div>
       <button class="btn primary" id="readyBtn">Ready</button>
-      <div class="dim">match starts when everyone (2+) is ready</div>
+      <div class="dim" id="lobbyHint">match starts when everyone (2+) is ready</div>
     </div>
 
     <!-- countdown -->
@@ -786,7 +807,7 @@ cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 
 let mode = null;            // 'solo' | 'server'
 let host = null, localPlayer = null;
-let serverWs = null, serverUrl = null, joinedRoom = null;
+let serverWs = null, serverUrl = null, joinedRoom = null, roomMode = 'ffa';
 let soloMode = false, botCount = 7;
 let myId = null;
 let roster = new Map();
@@ -838,7 +859,8 @@ function burst(x, y, c, n) {
 const els = {};
 ['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','serverInput','roomInput','serverBtn',
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
- 'hud','banner','conn','discSub','touchBomb','botsBtn']
+ 'hud','banner','conn','discSub','touchBomb','botsBtn',
+ 'modeLine','segMode','teamLine','joinR','joinB','lobbyHint']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -863,7 +885,7 @@ function setBusy(busy) {
 function resetNet(message) {
   if (serverWs) { try { serverWs.onclose = null; serverWs.close(); } catch (e) {} }
   if (host) { try { host.stop(); } catch (e) {} }
-  serverWs = null; serverUrl = null; joinedRoom = null; host = null; localPlayer = null;
+  serverWs = null; serverUrl = null; joinedRoom = null; roomMode = 'ffa'; host = null; localPlayer = null;
   mode = null; myId = null; soloMode = false;
   roster = new Map();
   setBusy(false);
@@ -879,6 +901,7 @@ function renderRoster() {
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
+    (roomMode === 'team' && p.team ? '<span class="teamtag ' + p.team + '">' + (p.team === 'R' ? 'RED' : 'BLUE') + '</span>' : '') +
     (p.admin ? '<span class="adminstar" title="moderator">&#9733;</span>' : '') +
     (p.spectator ? '<span class="spec">watching</span>'
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
@@ -893,15 +916,42 @@ function renderRoster() {
     });
   }
   const n = roster.size;
-  els.lobbyInfo.textContent = soloMode
-    ? 'You vs ' + (n - 1) + ' bots — ready up for the next round.'
-    : n < 2
-      ? 'Waiting for teammates — send them the invite link. ' + n + '/' + MAX_PLAYERS + ' joined.'
-      : n + '/' + MAX_PLAYERS + ' bombers in the lobby.';
+  if (roomMode === 'team') {
+    let R = 0, B = 0;
+    for (const p of roster.values()) { if (p.team === 'R') R++; else if (p.team === 'B') B++; }
+    els.lobbyInfo.textContent = 'Red ' + R + '  vs  Blue ' + B + ' — ' + n + '/' + MAX_PLAYERS + ' in the room.';
+  } else {
+    els.lobbyInfo.textContent = soloMode
+      ? 'You vs ' + (n - 1) + ' bots — ready up for the next round.'
+      : n < 2
+        ? 'Waiting for teammates — send them the invite link. ' + n + '/' + MAX_PLAYERS + ' joined.'
+        : n + '/' + MAX_PLAYERS + ' bombers in the lobby.';
+  }
   if (me) {
     els.readyBtn.textContent = me.ready ? 'Not ready' : 'Ready';
     els.readyBtn.classList.toggle('primary', !me.ready);
   }
+}
+
+// Mode toggle (host only) + team picker, shown in the lobby for server games.
+function renderLobbyControls() {
+  const me = roster.get(myId);
+  const isServer = mode === 'server';
+  const iAmAdmin = isServer && me && me.admin;
+  els.modeLine.classList.toggle('hidden', !isServer);
+  els.segMode.querySelectorAll('button').forEach(b => {
+    b.classList.toggle('sel', b.dataset.m === roomMode);
+    b.disabled = !iAmAdmin;                       // only the host changes mode
+  });
+  const teamMode = isServer && roomMode === 'team';
+  els.teamLine.classList.toggle('hidden', !teamMode);
+  if (teamMode && me) {
+    els.joinR.classList.toggle('on', me.team === 'R');
+    els.joinB.classList.toggle('on', me.team === 'B');
+  }
+  els.lobbyHint.textContent = teamMode
+    ? 'Pick a side — starts when everyone is ready and both teams have a player.'
+    : 'match starts when everyone (2+) is ready';
 }
 
 function updateHud() {
@@ -919,9 +969,20 @@ function updateHud() {
   }
   let right = '<div class="group">';
   if (snap && (phase === 'play' || phase === 'countdown' || phase === 'over')) {
-    const alive = snap.players.filter(p => p.a).length;
-    right += '<div class="stat"><span class="label">Bombers</span><span class="val">' + alive + '/' + snap.players.length + '</span></div>' +
-             (snap.sd ? '<div class="stat"><span class="label" style="color:var(--danger)">Sudden death</span></div>' : '');
+    if (roomMode === 'team') {
+      let R = 0, B = 0;
+      for (const p of snap.players) {
+        if (!p.a) continue;
+        const t = roster.get(p.id) && roster.get(p.id).team;
+        if (t === 'R') R++; else if (t === 'B') B++;
+      }
+      right += '<div class="stat"><span class="label" style="color:var(--p2)">Red</span><span class="val">' + R + '</span></div>' +
+               '<div class="stat"><span class="label" style="color:var(--p1)">Blue</span><span class="val">' + B + '</span></div>';
+    } else {
+      const alive = snap.players.filter(p => p.a).length;
+      right += '<div class="stat"><span class="label">Bombers</span><span class="val">' + alive + '/' + snap.players.length + '</span></div>';
+    }
+    right += (snap.sd ? '<div class="stat"><span class="label" style="color:var(--danger)">Sudden death</span></div>' : '');
   } else if (roster.size) {
     right += '<div class="stat"><span class="label">Online</span><span class="val">' + roster.size + '</span></div>';
   }
@@ -960,9 +1021,11 @@ function clientHandle(msg) {
     if (msg.room) { joinedRoom = msg.room; els.roomCode.textContent = msg.room; }
   } else if (msg.t === 'roster') {
     if (msg.room) { joinedRoom = msg.room; els.roomCode.textContent = msg.room; }
+    if (msg.mode) roomMode = msg.mode;
     roster = new Map(msg.players.map(p => [p.id, p]));
     onPhase(msg.phase);
     renderRoster();
+    renderLobbyControls();
     updateHud();
   } else if (msg.t === 'state') {
     onSnapshot(msg);
@@ -986,9 +1049,14 @@ function onSnapshot(s) {
     const w = s.winner;
     els.overTitle.textContent = w ? w.name + ' wins' : 'Draw';
     els.overTitle.style.color = w ? w.color : 'var(--danger)';
-    els.overSub.textContent = w
-      ? (w.id === myId ? 'That was you. Champion of the dusk arena.' : 'Last bomber standing.')
-      : 'Nobody survived the arena.';
+    if (!w) {
+      els.overSub.textContent = 'Nobody survived the arena.';
+    } else if (w.team) {
+      const meT = roster.get(myId) && roster.get(myId).team;
+      els.overSub.textContent = meT === w.team ? 'Your team takes the arena!' : 'The other team cleared the board.';
+    } else {
+      els.overSub.textContent = w.id === myId ? 'That was you. Champion of the dusk arena.' : 'Last bomber standing.';
+    }
     showOverlay('ovOver');
   }
 
@@ -1112,6 +1180,15 @@ els.readyBtn.addEventListener('click', () => {
   if (me) sendToServer({ t: 'ready', v: !me.ready });
   else showBanner('still connecting — hang tight', 2);
 });
+els.segMode.querySelectorAll('button').forEach(btn => {
+  btn.addEventListener('click', () => {
+    audio();
+    const me = roster.get(myId);
+    if (me && me.admin) sendToServer({ t: 'setmode', mode: btn.dataset.m });
+  });
+});
+els.joinR.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'R' }); });
+els.joinB.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'B' }); });
 els.copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(inviteUrl()).then(
     () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
@@ -1130,6 +1207,7 @@ els.botsBtn.addEventListener('click', () => {
   if (mode) return;
   soloMode = true;
   mode = 'solo';
+  roomMode = 'ffa';
   setConn('solo vs bots', false);
   host = createHost(clientHandle);
   host.start();
