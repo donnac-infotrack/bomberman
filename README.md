@@ -18,7 +18,9 @@ works under corporate proxies like Netskope.
    - **Free-for-all or Team:** the room host toggles the mode in the lobby. In
      **Team** mode everyone picks Red or Blue; teammates spawn together, friendly fire
      is off (your blasts spare teammates — but can still catch you), and the last team
-     with anyone alive wins. Starting needs a player on each team.
+     with anyone alive wins. Starting needs a player on each team. Bombs and flames that
+     are harmless to you (a teammate's, not your own) render in a cool, translucent
+     "safe" style so you can tell at a glance which fire you can walk through.
 2. **Solo vs bots:** pick a bot count (3/7/11/19) and play instantly. Runs entirely in
    your browser — no network at all.
 
