@@ -1350,28 +1350,40 @@ function drawItems(list) {
   }
 }
 
+// A teammate's bomb/blast (not your own) can't hurt you in team mode — show it
+// as a cool, translucent "safe" effect instead of the deadly orange flame.
+function friendlyToMe(e) {
+  if (!e || !e.tm) return false;
+  const me = roster.get(myId);
+  return !!(me && me.team && e.tm === me.team && e.o !== myId);
+}
+
 function drawBombs(list) {
   const s = TILE / 48;
   for (const b of list) {
+    const safe = friendlyToMe(b);
     const cx = centerOf(b.x), cy = centerOf(b.y);
     const urgency = b.f < 0.6 ? 14 : 6;
     const pulse = 1 + Math.sin(time * urgency) * 0.06;
     const r = 15 * s * pulse;
     ctx.fillStyle = 'rgba(0,0,0,.3)';
     ctx.beginPath(); ctx.ellipse(cx, cy + 13 * s, 13 * s, 5 * s, 0, 0, 6.29); ctx.fill();
-    ctx.fillStyle = b.f < 0.6 && Math.sin(time * 20) > 0 ? '#3d1620' : '#141222';
+    // deadly bombs flash red as the fuse runs out; a safe bomb never menaces you
+    ctx.fillStyle = (!safe && b.f < 0.6 && Math.sin(time * 20) > 0) ? '#3d1620' : (safe ? '#16283a' : '#141222');
     ctx.beginPath(); ctx.arc(cx, cy + 2 * s, r, 0, 6.29); ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,.18)';
+    ctx.fillStyle = safe ? 'rgba(150,210,240,.22)' : 'rgba(255,255,255,.18)';
     ctx.beginPath(); ctx.arc(cx - 5 * s, cy - 3 * s, r * 0.35, 0, 6.29); ctx.fill();
     const owner = roster.get(b.o);
     if (owner) {
       ctx.strokeStyle = owner.color; ctx.lineWidth = 2.5;
+      ctx.setLineDash(safe ? [4 * s, 3 * s] : []);   // dashed ring marks a harmless bomb
       ctx.beginPath(); ctx.arc(cx, cy + 2 * s, r + 3, 0, 6.29); ctx.stroke();
+      ctx.setLineDash([]);
     }
     ctx.strokeStyle = '#c9b88a'; ctx.lineWidth = 3 * s; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.moveTo(cx + 4 * s, cy - 11 * s); ctx.quadraticCurveTo(cx + 12 * s, cy - 18 * s, cx + 9 * s, cy - 22 * s); ctx.stroke();
     const sp = (2 + Math.sin(time * 25) * 1.5) * s;
-    ctx.fillStyle = PALETTE.flameCore;
+    ctx.fillStyle = safe ? '#8fd8ff' : PALETTE.flameCore;
     ctx.beginPath(); ctx.arc(cx + 9 * s, cy - 22 * s, sp + 1.5, 0, 6.29); ctx.fill();
   }
 }
@@ -1381,6 +1393,19 @@ function drawBlasts(list) {
     const px = bl.x * TILE, py = bl.y * TILE;
     const life = bl.t / BLAST_TIME;
     const flick = 0.85 + Math.sin(time * 40 + bl.x * 3 + bl.y * 7) * 0.15;
+    if (friendlyToMe(bl)) {
+      // harmless to you: cool, translucent — safe to stand in
+      ctx.globalAlpha = Math.min(1, life * 1.6) * 0.55;
+      ctx.fillStyle = 'rgba(90,150,190,.9)';
+      rrect(px + 4, py + 4, TILE - 8, TILE - 8, 10); ctx.fill();
+      ctx.fillStyle = 'rgba(150,205,235,.9)';
+      rrect(px + 10, py + 10, TILE - 20, TILE - 20, 8); ctx.fill();
+      ctx.fillStyle = 'rgba(220,245,255,.95)';
+      const cc = bl.c ? Math.round(TILE * 0.3) : Math.round(TILE * 0.36);
+      rrect(px + cc, py + cc, TILE - cc * 2, TILE - cc * 2, 5); ctx.fill();
+      ctx.globalAlpha = 1;
+      continue;
+    }
     ctx.globalAlpha = Math.min(1, life * 1.6) * flick;
     ctx.fillStyle = PALETTE.flameDeep;
     rrect(px + 3, py + 3, TILE - 6, TILE - 6, 10); ctx.fill();
