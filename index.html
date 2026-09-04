@@ -244,6 +244,12 @@
         <button class="btn small teamR" id="joinR">Red</button>
         <button class="btn small teamB" id="joinB">Blue</button>
       </div>
+      <div class="modeline hidden" id="botLine">
+        <span class="dim">bots</span>
+        <button class="btn small" id="botMinus">&minus;</button>
+        <span class="roomcode" id="botCount">0</span>
+        <button class="btn small" id="botPlus">Add bot</button>
+      </div>
       <div class="sub" id="lobbyInfo"></div>
       <div class="roster" id="roster"></div>
       <button class="btn primary" id="readyBtn">Ready</button>
@@ -253,6 +259,7 @@
         <div class="chatrow">
           <input type="text" id="chatInput" maxlength="200" placeholder="message your room" autocomplete="off">
           <button class="btn small" id="chatSend">Send</button>
+          <button class="btn small hidden" id="chatClear" title="clear the room chat">Clear</button>
         </div>
       </div>
     </div>
@@ -882,7 +889,8 @@ const els = {};
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
  'hud','banner','conn','discSub','touchBomb','botsBtn',
  'modeLine','segMode','teamLine','joinR','joinB','lobbyHint',
- 'chatBox','chatLog','chatInput','chatSend']
+ 'chatBox','chatLog','chatInput','chatSend','chatClear',
+ 'botLine','botMinus','botPlus','botCount']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -925,6 +933,7 @@ function renderRoster() {
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
     (roomMode === 'team' && p.team ? '<span class="teamtag ' + p.team + '">' + (p.team === 'R' ? 'RED' : 'BLUE') + '</span>' : '') +
+    (p.bot ? '<span class="spec">bot</span>' : '') +
     (p.admin ? '<span class="adminstar" title="moderator">&#9733;</span>' : '') +
     (p.spectator ? '<span class="spec">watching</span>'
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
@@ -973,6 +982,12 @@ function renderLobbyControls() {
     els.joinR.classList.toggle('on', me.team === 'R');
     els.joinB.classList.toggle('on', me.team === 'B');
   }
+  // bots: host-only, free-for-all only
+  const canBots = iAmAdmin && roomMode === 'ffa';
+  els.botLine.classList.toggle('hidden', !canBots);
+  if (canBots) els.botCount.textContent = [...roster.values()].filter(p => p.bot).length;
+  // Dunix can clear the room chat
+  els.chatClear.classList.toggle('hidden', !(isServer && me && me.dunix));
   els.lobbyHint.textContent = teamMode
     ? 'Pick a side — starts when everyone is ready and both teams have a player.'
     : 'match starts when everyone (2+) is ready';
@@ -1082,6 +1097,14 @@ function clientHandle(msg) {
   } else if (msg.t === 'chatlog') {
     clearChat();
     (msg.items || []).forEach(c => addChatMessage(c.from, c.color, c.text));
+  } else if (msg.t === 'clearchat') {
+    clearChat();
+    const sys = document.createElement('div');
+    sys.className = 'msg sys';
+    sys.textContent = 'chat cleared by ' + (msg.by || 'Dunix');
+    els.chatLog.innerHTML = '';
+    els.chatLog.appendChild(sys);
+    chatEmpty = false;
   } else if (msg.t === 'kicked') {
     const by = msg.by ? esc(msg.by) : 'the moderator';
     resetNet('');
@@ -1243,6 +1266,9 @@ els.segMode.querySelectorAll('button').forEach(btn => {
 els.joinR.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'R' }); });
 els.joinB.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'B' }); });
 els.chatSend.addEventListener('click', () => { audio(); sendChat(); els.chatInput.focus(); });
+els.chatClear.addEventListener('click', () => { audio(); sendToServer({ t: 'clearchat' }); });
+els.botPlus.addEventListener('click', () => { audio(); sendToServer({ t: 'addbot' }); });
+els.botMinus.addEventListener('click', () => { audio(); sendToServer({ t: 'removebot' }); });
 els.copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(inviteUrl()).then(
     () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
