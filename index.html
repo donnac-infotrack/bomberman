@@ -116,6 +116,20 @@
   .btn.teamB.on{background:var(--p1);color:#0b1230;border-color:#3a55a8}
   .rp .teamtag{font-size:10px;font-weight:800;letter-spacing:.06em}
   .rp .teamtag.R{color:var(--p2)} .rp .teamtag.B{color:var(--p1)}
+  .chatbox{width:100%;max-width:440px;display:flex;flex-direction:column;gap:6px}
+  .chatbox.hidden{display:none}
+  .chatlog{
+    height:120px;overflow-y:auto;text-align:left;
+    background:#141126;border:1px solid #35305a;border-radius:10px;
+    padding:8px 10px;font-size:12px;line-height:1.5;
+    display:flex;flex-direction:column;gap:2px;
+  }
+  .chatlog .msg{color:var(--ink);word-break:break-word}
+  .chatlog .who{font-weight:800}
+  .chatlog .sys{color:var(--ink-dim);font-style:italic}
+  .chatlog .empty{color:var(--ink-dim);font-style:italic}
+  .chatrow{display:flex;gap:8px}
+  .chatrow input{flex:1;width:auto;font-size:13px;text-align:left;padding:9px 12px}
   .roster{display:flex;flex-wrap:wrap;gap:8px;justify-content:center;max-width:640px}
   .rp{
     display:flex;align-items:center;gap:8px;
@@ -234,6 +248,13 @@
       <div class="roster" id="roster"></div>
       <button class="btn primary" id="readyBtn">Ready</button>
       <div class="dim" id="lobbyHint">match starts when everyone (2+) is ready</div>
+      <div class="chatbox hidden" id="chatBox">
+        <div class="chatlog" id="chatLog"><div class="empty">say hi to your room&hellip;</div></div>
+        <div class="chatrow">
+          <input type="text" id="chatInput" maxlength="200" placeholder="message your room" autocomplete="off">
+          <button class="btn small" id="chatSend">Send</button>
+        </div>
+      </div>
     </div>
 
     <!-- countdown -->
@@ -860,7 +881,8 @@ const els = {};
 ['ovStart','ovLobby','ovCount','ovOver','ovDisc','nameInput','serverInput','roomInput','serverBtn',
  'startStatus','roomCode','roomLine','copyBtn','readyBtn','roster','lobbyInfo','countNum','overTitle','overSub',
  'hud','banner','conn','discSub','touchBomb','botsBtn',
- 'modeLine','segMode','teamLine','joinR','joinB','lobbyHint']
+ 'modeLine','segMode','teamLine','joinR','joinB','lobbyHint',
+ 'chatBox','chatLog','chatInput','chatSend']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -888,6 +910,7 @@ function resetNet(message) {
   serverWs = null; serverUrl = null; joinedRoom = null; roomMode = 'ffa'; host = null; localPlayer = null;
   mode = null; myId = null; soloMode = false;
   roster = new Map();
+  clearChat();
   setBusy(false);
   if (message) setStatus(message, true);
   setConn('idle', false);
@@ -938,6 +961,7 @@ function renderLobbyControls() {
   const me = roster.get(myId);
   const isServer = mode === 'server';
   const iAmAdmin = isServer && me && me.admin;
+  els.chatBox.classList.toggle('hidden', !isServer);   // chat is for real rooms, not solo
   els.modeLine.classList.toggle('hidden', !isServer);
   els.segMode.querySelectorAll('button').forEach(b => {
     b.classList.toggle('sel', b.dataset.m === roomMode);
@@ -990,6 +1014,30 @@ function updateHud() {
   els.hud.innerHTML = left + right;
 }
 
+// ---------- room chat (lobby only, kept clear of the game controls) ----------
+let chatEmpty = true;
+function clearChat() { els.chatLog.innerHTML = ''; chatEmpty = true; }
+function addChatMessage(from, color, text) {
+  if (chatEmpty) { els.chatLog.innerHTML = ''; chatEmpty = false; }
+  const div = document.createElement('div');
+  div.className = 'msg';
+  const who = document.createElement('span');
+  who.className = 'who';
+  who.style.color = color || 'var(--ink)';
+  who.textContent = (from || 'Bomber') + ': ';
+  div.appendChild(who);
+  div.appendChild(document.createTextNode(text));   // textContent path — never HTML, so names/text can't inject markup
+  els.chatLog.appendChild(div);
+  while (els.chatLog.children.length > 100) els.chatLog.removeChild(els.chatLog.firstChild);
+  els.chatLog.scrollTop = els.chatLog.scrollHeight;
+}
+function sendChat() {
+  const t = els.chatInput.value.trim();
+  if (!t) return;
+  sendToServer({ t: 'chat', text: t });
+  els.chatInput.value = '';
+}
+
 let bannerT = null;
 function showBanner(text, secs) {
   els.banner.textContent = text;
@@ -1029,6 +1077,11 @@ function clientHandle(msg) {
     updateHud();
   } else if (msg.t === 'state') {
     onSnapshot(msg);
+  } else if (msg.t === 'chat') {
+    addChatMessage(msg.from, msg.color, msg.text);
+  } else if (msg.t === 'chatlog') {
+    clearChat();
+    (msg.items || []).forEach(c => addChatMessage(c.from, c.color, c.text));
   } else if (msg.t === 'kicked') {
     const by = msg.by ? esc(msg.by) : 'the moderator';
     resetNet('');
@@ -1189,6 +1242,7 @@ els.segMode.querySelectorAll('button').forEach(btn => {
 });
 els.joinR.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'R' }); });
 els.joinB.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'B' }); });
+els.chatSend.addEventListener('click', () => { audio(); sendChat(); els.chatInput.focus(); });
 els.copyBtn.addEventListener('click', () => {
   navigator.clipboard.writeText(inviteUrl()).then(
     () => { els.copyBtn.textContent = 'Copied!'; setTimeout(() => els.copyBtn.textContent = 'Copy invite link', 1500); },
@@ -1235,6 +1289,10 @@ const KEYMAP = {
 function sendInput() { sendToServer({ t: 'input', k: keys.map(k => k ? 1 : 0) }); }
 window.addEventListener('keydown', (e) => {
   audio();
+  if (document.activeElement === els.chatInput) {
+    if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
+    return;                                          // never let chat typing drive the game
+  }
   const typing = document.activeElement === els.nameInput ||
                  document.activeElement === els.serverInput ||
                  document.activeElement === els.roomInput;
