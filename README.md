@@ -15,6 +15,9 @@ works under corporate proxies like Netskope.
      different codes run at the same time (up to 200 rooms). The lobby's **Copy invite
      link** shares a `…?room=CODE` link that drops teammates straight into your room.
    - The first player in a room and anyone named **Dunix** can kick players.
+   - **Lobby chat:** each room has a chatbox in the lobby so players can talk before a
+     match; recent messages replay for anyone who joins late. Chat is lobby-only, so it
+     never clashes with the WASD/Space game controls during a round.
    - **Free-for-all or Team:** the room host toggles the mode in the lobby. In
      **Team** mode everyone picks Red or Blue; teammates spawn together, friendly fire
      is off (your blasts spare teammates — but can still catch you), and the last team
