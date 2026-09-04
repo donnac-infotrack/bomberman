@@ -17,7 +17,10 @@ works under corporate proxies like Netskope.
    - The first player in a room and anyone named **Dunix** can kick players.
    - **Lobby chat:** each room has a chatbox in the lobby so players can talk before a
      match; recent messages replay for anyone who joins late. Chat is lobby-only, so it
-     never clashes with the WASD/Space game controls during a round.
+     never clashes with the WASD/Space game controls during a round. A player named
+     **Dunix** can clear the room chat for everyone.
+   - **Bots:** in a free-for-all room the host can add or remove AI bots in the lobby
+     (server-side, so one human plus bots can play). Bots are free-for-all only.
    - **Free-for-all or Team:** the room host toggles the mode in the lobby. In
      **Team** mode everyone picks Red or Blue; teammates spawn together, friendly fire
      is off (your blasts spare teammates — but can still catch you), and the last team
