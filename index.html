@@ -928,7 +928,7 @@ function resetNet(message) {
 function renderRoster() {
   const me = roster.get(myId);
   els.roomLine.style.display = serverUrl ? '' : 'none';
-  const iAmAdmin = mode === 'server' && me && me.admin;
+  const canKick = mode === 'server';   // anyone in a room can kick anyone else
   els.roster.innerHTML = [...roster.values()].map(p =>
     '<div class="rp"><span class="dot" style="background:' + p.color + '"></span>' +
     '<span>' + esc(p.name) + (p.id === myId ? ' (you)' : '') + '</span>' +
@@ -937,9 +937,9 @@ function renderRoster() {
     (p.admin ? '<span class="adminstar" title="moderator">&#9733;</span>' : '') +
     (p.spectator ? '<span class="spec">watching</span>'
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
-    (iAmAdmin && p.id !== myId ? '<button class="kick" data-kick="' + p.id + '">kick</button>' : '') +
+    (canKick && p.id !== myId ? '<button class="kick" data-kick="' + p.id + '">kick</button>' : '') +
     '</div>').join('');
-  if (iAmAdmin) {
+  if (canKick) {
     els.roster.querySelectorAll('.kick').forEach(btn => {
       btn.addEventListener('click', () => {
         audio();
