@@ -14,7 +14,7 @@ works under corporate proxies like Netskope.
      code (e.g. `ALPHA`) so your team plays on its own arena — same code = same game,
      different codes run at the same time (up to 200 rooms). The lobby's **Copy invite
      link** shares a `…?room=CODE` link that drops teammates straight into your room.
-   - The first player in a room and anyone named **Dunix** can kick players.
+   - Any player can kick anyone else from their room.
    - **Lobby chat:** each room has a chatbox in the lobby so players can talk before a
      match; recent messages replay for anyone who joins late. Chat is lobby-only, so it
      never clashes with the WASD/Space game controls during a round. A player named
