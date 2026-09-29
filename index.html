@@ -108,6 +108,11 @@
   .roomcode{font-size:14px;font-weight:900;letter-spacing:.08em;color:var(--accent)}
   .modeline,.teamline{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;
     font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-dim)}
+  .voteline{display:flex;gap:10px;align-items:center;justify-content:center;flex-wrap:wrap;
+    background:#2a1622;border:1px solid #5a3040;border-radius:10px;padding:8px 14px;
+    font-size:13px;color:var(--ink)}
+  .voteline.hidden{display:none}
+  .voteline b{color:var(--danger)}
   .teamline.hidden,.modeline.hidden{display:none}
   #segMode button[disabled]{cursor:default;opacity:.9}
   .btn.teamR{border-color:#8a3040;color:#ff9aa6}
@@ -249,6 +254,10 @@
         <button class="btn small" id="botMinus">&minus;</button>
         <span class="roomcode" id="botCount">0</span>
         <button class="btn small" id="botPlus">Add bot</button>
+      </div>
+      <div class="voteline hidden" id="voteLine">
+        <span id="voteText"></span>
+        <button class="btn small" id="voteYes">Vote yes</button>
       </div>
       <div class="sub" id="lobbyInfo"></div>
       <div class="roster" id="roster"></div>
@@ -835,7 +844,7 @@ cvs.width = COLS * TILE; cvs.height = ROWS * TILE;
 
 let mode = null;            // 'solo' | 'server'
 let host = null, localPlayer = null;
-let serverWs = null, serverUrl = null, joinedRoom = null, roomMode = 'ffa';
+let serverWs = null, serverUrl = null, joinedRoom = null, roomMode = 'ffa', activeVote = null;
 let soloMode = false, botCount = 7;
 let myId = null;
 let roster = new Map();
@@ -890,7 +899,7 @@ const els = {};
  'hud','banner','conn','discSub','touchBomb','botsBtn',
  'modeLine','segMode','teamLine','joinR','joinB','lobbyHint',
  'chatBox','chatLog','chatInput','chatSend','chatClear',
- 'botLine','botMinus','botPlus','botCount']
+ 'botLine','botMinus','botPlus','botCount','voteLine','voteText','voteYes']
   .forEach(id => els[id] = document.getElementById(id));
 
 function showOverlay(name) {
@@ -918,6 +927,8 @@ function resetNet(message) {
   serverWs = null; serverUrl = null; joinedRoom = null; roomMode = 'ffa'; host = null; localPlayer = null;
   mode = null; myId = null; soloMode = false;
   roster = new Map();
+  activeVote = null;
+  if (els.voteLine) els.voteLine.classList.add('hidden');
   clearChat();
   setBusy(false);
   if (message) setStatus(message, true);
@@ -937,13 +948,13 @@ function renderRoster() {
     (p.admin ? '<span class="adminstar" title="moderator">&#9733;</span>' : '') +
     (p.spectator ? '<span class="spec">watching</span>'
       : '<span class="rdy ' + (p.ready ? 'yes' : 'no') + '">' + (p.ready ? 'ready' : 'not ready') + '</span>') +
-    (canKick && p.id !== myId ? '<button class="kick" data-kick="' + p.id + '">kick</button>' : '') +
+    (canKick && p.id !== myId && !p.bot ? '<button class="kick" data-kick="' + p.id + '">vote kick</button>' : '') +
     '</div>').join('');
   if (canKick) {
     els.roster.querySelectorAll('.kick').forEach(btn => {
       btn.addEventListener('click', () => {
         audio();
-        sendToServer({ t: 'kick', id: parseInt(btn.dataset.kick, 10) });
+        sendToServer({ t: 'votekick', id: parseInt(btn.dataset.kick, 10) });
       });
     });
   }
@@ -963,6 +974,14 @@ function renderRoster() {
     els.readyBtn.textContent = me.ready ? 'Not ready' : 'Ready';
     els.readyBtn.classList.toggle('primary', !me.ready);
   }
+}
+
+function renderVote() {
+  const v = activeVote;
+  if (!v || mode !== 'server') { els.voteLine.classList.add('hidden'); return; }
+  els.voteLine.classList.remove('hidden');
+  els.voteText.innerHTML = 'Vote-kick <b>' + esc(v.name) + '</b>: ' + v.votes + '/' + v.needed;
+  els.voteYes.style.display = (v.targetId === myId) ? 'none' : '';   // the target can't vote
 }
 
 // Mode toggle (host only) + team picker, shown in the lobby for server games.
@@ -1105,6 +1124,14 @@ function clientHandle(msg) {
     els.chatLog.innerHTML = '';
     els.chatLog.appendChild(sys);
     chatEmpty = false;
+  } else if (msg.t === 'vote') {
+    activeVote = msg;
+    renderVote();
+  } else if (msg.t === 'voteend') {
+    activeVote = null;
+    renderVote();
+    if (msg.result === 'kicked') showBanner(msg.name + ' was vote-kicked', 3);
+    else if (msg.result === 'failed') showBanner('vote to kick ' + msg.name + ' failed', 3);
   } else if (msg.t === 'kicked') {
     const by = msg.by ? esc(msg.by) : 'the moderator';
     resetNet('');
@@ -1267,6 +1294,7 @@ els.joinR.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam'
 els.joinB.addEventListener('click', () => { audio(); sendToServer({ t: 'setteam', team: 'B' }); });
 els.chatSend.addEventListener('click', () => { audio(); sendChat(); els.chatInput.focus(); });
 els.chatClear.addEventListener('click', () => { audio(); sendToServer({ t: 'clearchat' }); });
+els.voteYes.addEventListener('click', () => { audio(); if (activeVote) sendToServer({ t: 'votekick', id: activeVote.targetId }); });
 els.botPlus.addEventListener('click', () => { audio(); sendToServer({ t: 'addbot' }); });
 els.botMinus.addEventListener('click', () => { audio(); sendToServer({ t: 'removebot' }); });
 els.copyBtn.addEventListener('click', () => {

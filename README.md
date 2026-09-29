@@ -14,7 +14,8 @@ works under corporate proxies like Netskope.
      code (e.g. `ALPHA`) so your team plays on its own arena — same code = same game,
      different codes run at the same time (up to 200 rooms). The lobby's **Copy invite
      link** shares a `…?room=CODE` link that drops teammates straight into your room.
-   - Any player can kick anyone else from their room.
+   - **Vote-kick:** any player can call a vote to kick another; the target is removed
+     only when a strict majority of the other players vote yes (30-second timeout).
    - **Lobby chat:** each room has a chatbox in the lobby so players can talk before a
      match; recent messages replay for anyone who joins late. Chat is lobby-only, so it
      never clashes with the WASD/Space game controls during a round. A player named
